@@ -1,0 +1,19 @@
+# Do not include environment files or text-file secrets/configuration.
+.env*
+**/.env*
+*.txt
+
+# Local environments and generated dependencies.
+.venv/
+venv/
+agent-env/
+**/.venv/
+**/venv/
+**/agent-env/
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+__pycache__/
+**/__pycache__/
+

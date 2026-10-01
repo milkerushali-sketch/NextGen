@@ -1,0 +1,11 @@
+{
+  "name": "novacart",
+  "private": true,
+  "scripts": {
+    "dev": "npm --prefix REACT-APP run dev",
+    "server": "npm --prefix REACT-APP run server",
+    "dev:full": "npm --prefix REACT-APP run dev:full",
+    "build": "npm --prefix REACT-APP run build",
+    "lint": "npm --prefix REACT-APP run lint"
+  }
+}

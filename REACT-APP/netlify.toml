@@ -1,0 +1,5 @@
+[build.environment]
+  # These are backend/Express-only variables (see backend/server.js, backend/assistant.js).
+  # This site only builds and publishes the Vite frontend, which never reads them, so
+  # any match against them in build output is a false positive from secrets scanning.
+  SECRETS_SCAN_OMIT_KEYS = "FRONTEND_URL,GOOGLE_GEMINI_API_KEY,JWT_EXPIRE,JWT_REFRESH_EXPIRE,JWT_SECRET,MONGODB_URI,NODE_ENV,PORT"
