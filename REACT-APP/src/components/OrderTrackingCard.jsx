@@ -4,6 +4,7 @@ export default function OrderTrackingCard({ order }) {
   const shipmentStatus = order.shipmentStatus || order.shipment_status || order.deliveryStatus;
   const paymentStatus = order.paymentStatus || order.payment_status;
   const refundStatus = order.refundStatus || order.refund_status;
+  const returnStatus = order.returnStatus || order.return_status;
 
   return (
     <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
@@ -24,6 +25,7 @@ export default function OrderTrackingCard({ order }) {
       )}
       {paymentStatus && <p className="mt-1 text-sm">Payment: {paymentStatus}</p>}
       {refundStatus && <p className="mt-1 text-sm">Refund: {refundStatus}</p>}
+      {returnStatus && <p className="mt-1 text-sm">Return: {returnStatus}</p>}
       {order.total !== undefined && <p className="mt-2 font-semibold">Total: ₹{Number(order.total).toFixed(2)}</p>}
     </article>
   );

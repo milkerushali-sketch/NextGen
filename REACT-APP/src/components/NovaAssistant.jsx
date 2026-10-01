@@ -9,6 +9,11 @@ import OrderTrackingCard from "./OrderTrackingCard";
 import TicketStatusCard from "./TicketStatusCard";
 import PolicyCard from "./PolicyCard";
 import EscalationCard from "./EscalationCard";
+import { getLocalOrders, saveLocalOrders } from "../utils/localOrder";
+import {
+  handleLocalDemoOrderRequest,
+  resolveOrderFollowup,
+} from "../utils/orderSupport";
 
 const shopProducts = [
   {
@@ -164,6 +169,9 @@ const pickShopRecs = (ids) =>
 
 const buildDummyAssistantResponse = (message) => {
   const lower = String(message || "").toLowerCase();
+  const orderReference = String(message || "").match(
+    /\border\s*(?:(?:id|number)\s*)?#?\s*(DEMO-\d{1,16}|\d{1,12})\b/i,
+  )?.[1];
 
   if (/under\s*₹?\s*2000|gift under|gift.*2000|budget.*2000/.test(lower)) {
     return {
@@ -183,32 +191,36 @@ const buildDummyAssistantResponse = (message) => {
 
   if (/track order|tracking|order status/.test(lower)) {
     return {
-      text:
-        "Your order #NOV-2048 is currently in transit and is expected to arrive in 2–3 days. You can track it in your account or copy the order number here for a quick status update.",
+      text: orderReference
+        ? `I couldn't verify order #${orderReference} because the secure order service is unavailable. No live status was retrieved; please try again later.`
+        : "Please share your order number so I can check its recorded status. I can't verify live tracking while the order service is unavailable.",
       recommendations: [],
     };
   }
 
   if (/return.*order|return your order|return/.test(lower)) {
     return {
-      text:
-        "I can help with a return. Please share your order number and the item you want to return. We’ll guide you through the simple return steps and confirm the pickup window.",
+      text: orderReference
+        ? `I couldn't verify order #${orderReference}, so no return request was submitted. Please try again when the secure order service is available.`
+        : "I can help with a return. Please share your order number and the item you want to return.",
       recommendations: [],
     };
   }
 
   if (/refund|refund query/.test(lower)) {
     return {
-      text:
-        "Your refund is usually processed within 5–7 business days depending on the payment method. Share your order number and I’ll help you check the current status.",
+      text: orderReference
+        ? `I couldn't verify the payment or refund status for order #${orderReference} because the secure order service is unavailable.`
+        : "Please share your order number so I can check the recorded payment and refund status. I can't verify a refund without the order record.",
       recommendations: [],
     };
   }
 
   if (/cancel.*order|cancel order/.test(lower)) {
     return {
-      text:
-        "If the order is not yet shipped, we can usually cancel it. Please share the order number and I’ll guide you through the cancellation request.",
+      text: orderReference
+        ? `I couldn't verify order #${orderReference}, so no cancellation was submitted. Please try again when the secure order service is available.`
+        : "I can check whether cancellation is available. Please share your order number first.",
       recommendations: [],
     };
   }
@@ -419,19 +431,49 @@ export default function NovaAssistant({
 
   const sendMessage = async (message, confirmation = {}) => {
     const userMessage = { sender: "user", text: message };
+    const previousUserMessage = [...messages]
+      .reverse()
+      .find((entry) => entry.sender === "user")?.text;
+    const orderFollowup = resolveOrderFollowup(message, previousUserMessage);
+    const requestMessage = orderFollowup.message;
     setMessages((current) => [...current, userMessage]);
     setInput("");
     setIsLoading(true);
 
-    const fallbackReply = getShopkeeperFallback(message);
+    const fallbackReply = getShopkeeperFallback(requestMessage);
 
     try {
+      if (orderFollowup.demoOrderId) {
+        const localResult = handleLocalDemoOrderRequest({
+          demoOrderId: orderFollowup.demoOrderId,
+          message: requestMessage,
+          confirmedAction: confirmation.confirmedAction,
+          orders: getLocalOrders(),
+        });
+        if (localResult) {
+          saveLocalOrders(localResult.orders);
+          setMessages((current) => [
+            ...current,
+            {
+              sender: "bot",
+              text: localResult.message,
+              orderDetails: localResult.orderDetails,
+              pendingAction: localResult.pendingAction,
+              actionType: "order_tracking",
+            },
+          ]);
+          return;
+        }
+      }
+
       const response = await fetch(apiUrl(apiEndpoints.agentQuery), {
         method: "POST",
         headers: authHeaders(token),
         body: JSON.stringify({
-          message,
-          ...(confirmation.orderId ? { orderId: confirmation.orderId } : {}),
+          message: requestMessage,
+          ...((confirmation.orderId || orderFollowup.orderId)
+            ? { orderId: confirmation.orderId || orderFollowup.orderId }
+            : {}),
           ...(confirmation.confirmedAction
             ? { confirmedAction: confirmation.confirmedAction }
             : {}),
@@ -480,9 +522,9 @@ export default function NovaAssistant({
         },
       ]);
     } catch {
-      const dummyReply = buildDummyAssistantResponse(message);
+      const dummyReply = buildDummyAssistantResponse(requestMessage);
       const accountOrderQuestion =
-        /\b(track|tracking|order|return|refund|cancel|payment)\b/i.test(message);
+        /\b(track|tracking|order|return|refund|cancel|payment)\b/i.test(requestMessage);
       setMessages((current) => [
         ...current,
         {
