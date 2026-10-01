@@ -454,6 +454,7 @@ const assistantRouter = ({ pool }) => {
           orderId: req.body?.orderId,
           customer: req.auth,
           confirmedProductId: req.body?.confirmedProductId,
+          confirmedAction: req.body?.confirmedAction,
           quantity: req.body?.quantity,
         });
         const recommendations = (agentResult.products || []).map((product) => ({
@@ -544,10 +545,9 @@ const assistantRouter = ({ pool }) => {
       intent: answerSet.intent,
       similarProducts: answerSet.similarProducts,
     });
-  } catch (error) {
+  } catch {
     return res.status(500).json({
       message: "Unable to generate recommendations right now.",
-      error: error.message,
     });
   }
   });

@@ -19,6 +19,7 @@ export function agentRouter({ pool }) {
         orderId: req.body?.orderId,
         customer: req.auth,
         confirmedProductId: req.body?.confirmedProductId,
+        confirmedAction: req.body?.confirmedAction,
         quantity: req.body?.quantity,
       });
       return res.json(result);
@@ -285,18 +286,24 @@ export function agentRouter({ pool }) {
     if (!subject || !description) {
       return res.status(400).json({ message: "Subject and description are required." });
     }
+    let client;
     try {
       if (req.body?.orderId && !orderId) {
         return res.status(400).json({ message: "Invalid order number." });
       }
+      client = await pool.connect();
+      await client.query("BEGIN");
       if (orderId) {
-        const ownedOrder = await pool.query(
+        const ownedOrder = await client.query(
           "SELECT id FROM orders WHERE id = $1 AND customer_id = $2",
           [orderId, req.auth.userId],
         );
-        if (!ownedOrder.rowCount) return res.status(404).json({ message: "Order not found." });
+        if (!ownedOrder.rowCount) {
+          await client.query("ROLLBACK");
+          return res.status(404).json({ message: "Order not found." });
+        }
       }
-      const { rows } = await pool.query(
+      const { rows } = await client.query(
         `INSERT INTO support_tickets
           (user_email, customer_id, subject, description, category, priority, order_id)
          VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -304,10 +311,22 @@ export function agentRouter({ pool }) {
                    order_id AS "orderId", created_at AS "createdAt"`,
         [req.auth.email, req.auth.userId, subject, description, category, priority, orderId],
       );
+      await client.query(
+        "INSERT INTO ticket_messages (ticket_id, sender_type, message) VALUES ($1, 'customer', $2)",
+        [rows[0].id, description],
+      );
+      await client.query("COMMIT");
       return res.status(201).json(rows[0]);
     } catch (error) {
+      if (client) {
+        await client.query("ROLLBACK").catch((rollbackError) => {
+          console.error("Ticket transaction rollback failed:", rollbackError.message);
+        });
+      }
       console.error("Ticket creation failed:", error.message);
       return res.status(500).json({ message: "Unable to create your support ticket." });
+    } finally {
+      client?.release();
     }
   });
 

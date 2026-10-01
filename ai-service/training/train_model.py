@@ -6,6 +6,9 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
 
+# Kaggle customer-support ticket data trains the supervised machine-learning classifiers.
+# The LLM is used for conversational generation and tool orchestration.
+# RAG retrieves current internal company-policy documents.
 ROOT = Path(__file__).parents[1]
 LABELS = ("intent", "priority", "sentiment")
 
@@ -39,4 +42,3 @@ def train(label: str) -> None:
     joblib.dump(vectorizer, model_dir / "tfidf_vectorizer.joblib")
     joblib.dump(classifier, model_dir / f"{label}_classifier.joblib")
     print(f"Saved {label} classifier and shared TF-IDF vectorizer to {model_dir}")
-

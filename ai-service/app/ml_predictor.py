@@ -48,6 +48,7 @@ def normalize_intent(label: str, message: str = "") -> str:
         (r"\b(order|buy|checkout|purchase)\b", "place_order_help"),
         (r"\b(complaint|angry|terrible|unacceptable)\b", "general_complaint"),
         (r"\b(product|recommend|show|find|looking for)\b", "product_query"),
+        (r"\b(what is|what does|difference between)\b", "product_query"),
     )
     for pattern, intent in rules:
         if re.search(pattern, value):

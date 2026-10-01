@@ -1,5 +1,4 @@
 import re
-from collections.abc import Iterable
 from typing import Any
 
 TEAM_BY_INTENT = {
@@ -11,6 +10,7 @@ TEAM_BY_INTENT = {
     "delivery_delay": "Delivery Team",
     "shipment_problem": "Delivery Team",
     "return_request": "Returns Team",
+    "cancel_order": "Customer Support Team",
     "damaged_product": "Returns Team",
     "replacement": "Returns Team",
     "account_issue": "Technical Team",
@@ -108,4 +108,3 @@ def get_escalation_decision(
         "escalationReason": reason,
         "assignedTeam": assigned_team(intent, reason),
     }
-

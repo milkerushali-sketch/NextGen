@@ -1,10 +1,16 @@
-const AI_SERVICE_URL = process.env.AI_SERVICE_URL || "http://127.0.0.1:8000";
-
-export async function requestAiAgent({ message, orderId, customer, confirmedProductId, quantity }) {
+export async function requestAiAgent({
+  message,
+  orderId,
+  customer,
+  confirmedProductId,
+  confirmedAction,
+  quantity,
+}) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 15000);
+  const timeout = setTimeout(() => controller.abort(), 30000);
   try {
-    const response = await fetch(`${AI_SERVICE_URL}/agent/chat`, {
+    const serviceUrl = process.env.AI_SERVICE_URL || "http://127.0.0.1:8000";
+    const response = await fetch(`${serviceUrl}/agent/chat`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -19,6 +25,7 @@ export async function requestAiAgent({ message, orderId, customer, confirmedProd
         confirmed_product_id: confirmedProductId
           ? Number(confirmedProductId)
           : null,
+        confirmed_action: confirmedAction || null,
         quantity: quantity ? Number(quantity) : 1,
       }),
       signal: controller.signal,

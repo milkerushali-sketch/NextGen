@@ -20,6 +20,7 @@ class AgentRequest(BaseModel):
     customer_id: int | None = None
     order_id: int | None = None
     confirmed_product_id: int | None = None
+    confirmed_action: Literal["return_request", "refund_request", "cancel_request"] | None = None
     quantity: int = Field(default=1, ge=1, le=20)
     context: dict[str, Any] = Field(default_factory=dict)
 
@@ -48,6 +49,7 @@ class OrderDetails(BaseModel):
     status: str
     total: float
     payment_status: str | None = None
+    refund_status: str | None = None
     shipment_status: str | None = None
     tracking_id: str | None = None
     expected_delivery: str | None = None
@@ -65,6 +67,9 @@ class AgentResponse(BaseModel):
     action_type: ActionType = Field(default="answer", alias="actionType")
     products: list[ProductResult] = Field(default_factory=list)
     order_details: OrderDetails | None = Field(default=None, alias="orderDetails")
+    pending_action: Literal["return_request", "refund_request", "cancel_request"] | None = Field(
+        default=None, alias="pendingAction"
+    )
     should_escalate: bool = Field(default=False, alias="shouldEscalate")
     escalation_reason: str | None = Field(default=None, alias="escalationReason")
     assigned_team: str | None = Field(default=None, alias="assignedTeam")

@@ -23,10 +23,11 @@ def log_decision(
     logger.info("%s %s", event, serialized)
     try:
         with get_connection() as connection:
-            connection.execute(
-                """INSERT INTO agent_audit_logs (customer_id, event_type, details)
-                   VALUES (%s, %s, %s::jsonb)""",
-                (customer_id, event[:100], serialized),
-            )
+            with connection.transaction():
+                connection.execute(
+                    """INSERT INTO agent_audit_logs (customer_id, event_type, details)
+                       VALUES (%s, %s, %s::jsonb)""",
+                    (customer_id, event[:100], serialized),
+                )
     except (OSError, PsycopgError) as error:
         logger.warning("Could not persist AI audit event: %s", error)

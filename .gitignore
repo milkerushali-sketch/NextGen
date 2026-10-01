@@ -3,6 +3,11 @@
 **/.env*
 *.txt
 
+# Track the safe AI-service setup files requested for this project.
+!ai-service/.env.example
+!REACT-APP/.env.example
+!ai-service/requirements.txt
+
 # Local environments and generated dependencies.
 .venv/
 venv/
@@ -16,4 +21,3 @@ dist/
 **/dist/
 __pycache__/
 **/__pycache__/
-

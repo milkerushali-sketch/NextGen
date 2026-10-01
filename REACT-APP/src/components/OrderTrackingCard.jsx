@@ -3,6 +3,7 @@ export default function OrderTrackingCard({ order }) {
   const trackingId = order.trackingId || order.tracking_id;
   const shipmentStatus = order.shipmentStatus || order.shipment_status || order.deliveryStatus;
   const paymentStatus = order.paymentStatus || order.payment_status;
+  const refundStatus = order.refundStatus || order.refund_status;
 
   return (
     <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
@@ -22,7 +23,7 @@ export default function OrderTrackingCard({ order }) {
         <p className="mt-1 text-sm">Expected delivery: {new Date(expectedDelivery).toLocaleDateString()}</p>
       )}
       {paymentStatus && <p className="mt-1 text-sm">Payment: {paymentStatus}</p>}
-      {order.refundStatus && <p className="mt-1 text-sm">Refund: {order.refundStatus}</p>}
+      {refundStatus && <p className="mt-1 text-sm">Refund: {refundStatus}</p>}
       {order.total !== undefined && <p className="mt-2 font-semibold">Total: ₹{Number(order.total).toFixed(2)}</p>}
     </article>
   );

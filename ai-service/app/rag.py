@@ -87,7 +87,13 @@ def search_company_policy(query: str, limit: int = 4) -> list[dict[str, Any]]:
 
 def retrieve_policy_context(message: str, limit: int = 4) -> list[dict[str, Any]]:
     try:
-        return search_company_policy(message, limit)
+        minimum = get_settings().policy_min_similarity
+        results = search_company_policy(message, limit)
+        return [
+            result
+            for result in results
+            if float(result["similarity"]) >= minimum
+        ]
     except (ImportError, OSError, RuntimeError, ValueError, PsycopgError) as error:
         logger.warning("Policy retrieval unavailable: %s", error)
         return []

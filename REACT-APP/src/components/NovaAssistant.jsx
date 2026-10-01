@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { FaCommentDots, FaPaperPlane, FaRobot, FaTimes } from "react-icons/fa";
 import { useAuth } from "../context/AuthContext";
@@ -111,6 +111,11 @@ const getFaqFallback = (message) => {
 };
 
 const getDisplayName = (user) => user?.name || "there";
+const requestActionLabels = {
+  return_request: "return",
+  refund_request: "refund",
+  cancel_request: "cancellation",
+};
 
 const buildWelcomeMessages = (user) => {
   const name = getDisplayName(user);
@@ -232,16 +237,25 @@ export default function NovaAssistant({
     return buildWelcomeMessages(null);
   });
   const [isLoading, setIsLoading] = useState(false);
+  const messagesEndRef = useRef(null);
+  const previousMessageCount = useRef(messages.length);
 
   const isOpen = controlledOpen ?? internalOpen;
 
-  const setIsOpen = (value) => {
+  useEffect(() => {
+    if (messages.length > previousMessageCount.current) {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    }
+    previousMessageCount.current = messages.length;
+  }, [messages.length]);
+
+  const setIsOpen = useCallback((value) => {
     if (onOpenChange) {
       onOpenChange(value);
       return;
     }
     setInternalOpen(value);
-  };
+  }, [onOpenChange]);
 
   useEffect(() => {
     const handleAssistantOpen = () => {
@@ -252,7 +266,7 @@ export default function NovaAssistant({
     return () => {
       window.removeEventListener("open-nova-assistant", handleAssistantOpen);
     };
-  }, [onOpenChange]);
+  }, [setIsOpen]);
 
   useEffect(() => {
     const handleAssistantTopic = (event) => {
@@ -310,6 +324,10 @@ export default function NovaAssistant({
         headers: authHeaders(token),
         body: JSON.stringify({
           message,
+          ...(confirmation.orderId ? { orderId: confirmation.orderId } : {}),
+          ...(confirmation.confirmedAction
+            ? { confirmedAction: confirmation.confirmedAction }
+            : {}),
           ...(confirmation.confirmedProductId
             ? {
                 confirmedProductId: confirmation.confirmedProductId,
@@ -345,6 +363,7 @@ export default function NovaAssistant({
           recommendations,
           actionType: data.actionType || data.action_type,
           orderDetails: data.orderDetails || data.order_details || null,
+          pendingAction: data.pendingAction || data.pending_action || null,
           policyReference: data.policyReference || data.policy_reference || null,
           ticketId: data.ticketId || data.ticket_id || null,
           assignedTeam: data.assignedTeam || data.assigned_team || null,
@@ -354,12 +373,18 @@ export default function NovaAssistant({
         },
       ]);
     } catch {
+      const accountOrderQuestion =
+        /\b(track|tracking|order|return|refund|cancel|payment)\b/i.test(message);
       setMessages((current) => [
         ...current,
         {
           sender: "bot",
-          text: fallbackReply.text,
-          recommendations: fallbackReply.recommendations,
+          text: accountOrderQuestion
+            ? "I couldn’t connect to the secure order service, so I couldn’t verify your order. Please try again shortly or open Orders to view your account details."
+            : fallbackReply.text,
+          recommendations: accountOrderQuestion
+            ? []
+            : fallbackReply.recommendations,
         },
       ]);
     } finally {
@@ -385,7 +410,7 @@ export default function NovaAssistant({
   );
 
   return (
-    <div className="fixed bottom-5 right-5 z-50">
+    <div className="fixed bottom-2 right-2 z-50 sm:bottom-5 sm:right-5">
       <AnimatePresence>
         {isOpen && (
           <motion.div
@@ -393,7 +418,7 @@ export default function NovaAssistant({
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 20, scale: 0.96 }}
             transition={{ duration: 0.25 }}
-            className="mb-4 w-[360px] overflow-hidden rounded-[30px] border border-slate-200 bg-white shadow-[0_30px_90px_rgba(15,23,42,0.22)] dark:border-slate-800 dark:bg-slate-900"
+            className="mb-2 flex h-[min(720px,calc(100dvh-1rem))] w-[min(420px,calc(100vw-1rem))] flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_30px_90px_rgba(15,23,42,0.22)] dark:border-slate-700 dark:bg-slate-900 sm:mb-4"
           >
             <div className="flex items-center justify-between bg-gradient-to-r from-violet-600 to-indigo-600 px-4 py-3 text-white">
               <div className="flex items-center gap-3">
@@ -426,13 +451,16 @@ export default function NovaAssistant({
               </button>
             </div>
 
-            <div className="chat-scrollbar max-h-80 space-y-3 overflow-y-auto bg-slate-50 p-4 dark:bg-slate-950/60">
+            <div
+              className="chat-scrollbar min-h-0 flex-1 space-y-3 overflow-y-auto bg-slate-50 p-4 dark:bg-slate-950/60"
+              aria-live="polite"
+            >
               {messages.map((message, index) => (
                 <div
                   key={`${message.sender}-${index}`}
-                  className={`max-w-[88%] rounded-2xl px-3 py-2 text-sm whitespace-pre-line ${
+                  className={`max-w-[94%] break-words rounded-2xl px-4 py-3 text-base leading-6 whitespace-pre-line ${
                     message.sender === "bot"
-                      ? "bg-white text-slate-700 shadow-sm dark:bg-slate-800 dark:text-slate-200"
+                      ? "bg-white text-slate-800 shadow-sm dark:bg-slate-800 dark:text-slate-100"
                       : "ml-auto bg-violet-600 text-white"
                   }`}
                 >
@@ -455,6 +483,32 @@ export default function NovaAssistant({
                       <OrderTrackingCard order={message.orderDetails} />
                     </div>
                   )}
+                  {message.sender === "bot" &&
+                    message.pendingAction &&
+                    message.orderDetails?.id && (
+                      <button
+                        type="button"
+                        disabled={isLoading || !isAuthenticated}
+                        onClick={() =>
+                          sendMessage(
+                            `Please confirm and submit my request to ${
+                              message.pendingAction === "cancel_request"
+                                ? "cancel"
+                                : message.pendingAction === "refund_request"
+                                  ? "request a refund for"
+                                  : "return"
+                            } my order #${message.orderDetails.id}`,
+                            {
+                              confirmedAction: message.pendingAction,
+                              orderId: message.orderDetails.id,
+                            },
+                          )
+                        }
+                        className="mt-3 w-full rounded-xl bg-violet-600 px-4 py-3 text-base font-semibold leading-6 text-white hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        Confirm and submit {requestActionLabels[message.pendingAction]} request
+                      </button>
+                    )}
                   {message.sender === "bot" && message.policyReference && (
                     <div className="mt-3">
                       <PolicyCard title={message.policyReference}>
@@ -542,13 +596,15 @@ export default function NovaAssistant({
                       key={option}
                       type="button"
                       onClick={() => handleQuickOption(option)}
-                      className="w-full rounded-2xl border border-violet-200 bg-violet-50 px-3 py-2 text-left text-sm font-medium text-violet-700 transition hover:bg-violet-100 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-200"
+                      className="w-full rounded-2xl border border-violet-200 bg-violet-50 px-4 py-3 text-left text-base font-semibold leading-6 text-violet-800 transition hover:bg-violet-100 dark:border-violet-400/50 dark:bg-violet-950 dark:text-violet-100 dark:hover:bg-violet-900"
                     >
                       {option}
                     </button>
                   ))}
                 </div>
               )}
+
+              <div ref={messagesEndRef} className="h-px" />
 
               {(messages.length > 1 || !isAuthenticated) && (
                 <button
@@ -568,8 +624,8 @@ export default function NovaAssistant({
               <input
                 value={input}
                 onChange={(event) => setInput(event.target.value)}
-                placeholder="Ask for recommendations..."
-                className="flex-1 rounded-full border border-slate-200 bg-slate-50 px-4 py-2 text-sm text-slate-700 outline-none placeholder:text-slate-400 focus:border-violet-400 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                placeholder="Ask about products, orders, returns..."
+                className="min-w-0 flex-1 rounded-full border border-slate-300 bg-slate-50 px-4 py-3 text-base text-slate-800 outline-none placeholder:text-slate-500 focus:border-violet-500 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:placeholder:text-slate-400"
               />
               <button
                 type="submit"

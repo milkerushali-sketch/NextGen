@@ -1,4 +1,3 @@
-import os
 from functools import lru_cache
 from pathlib import Path
 
@@ -23,6 +22,10 @@ class Settings(BaseSettings):
         default="sentence-transformers/all-mpnet-base-v2",
         alias="POLICY_EMBEDDING_MODEL",
     )
+    policy_min_similarity: float = Field(
+        default=0.35, alias="POLICY_MIN_SIMILARITY", ge=-1, le=1
+    )
+    refund_auto_limit: float = Field(default=1000.0, alias="REFUND_AUTO_LIMIT", gt=0)
     port: int = Field(default=8000, alias="AI_SERVICE_PORT")
 
     model_config = SettingsConfigDict(
@@ -39,4 +42,3 @@ def get_settings() -> Settings:
 
 def configured_service_token() -> str:
     return get_settings().ai_service_token.get_secret_value()
-

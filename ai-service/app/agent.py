@@ -7,32 +7,48 @@ from typing import Any
 
 from .audit_logger import log_decision
 from .config import get_settings
-from .database import get_connection
 from .escalation import get_escalation_decision, get_unresolved_ticket_count
 from .llm_provider import create_llm, invoke_tool_agent
 from .ml_predictor import predict
 from .rag import retrieve_policy_context
 from . import tools as business_tools
 from .schemas import AgentRequest, AgentResponse
-from .web_tools import search_web, search_wikipedia
+from .web_tools import is_safe_public_query, search_web, search_wikipedia
 
 logger = logging.getLogger("novacart.ai.agent")
-_ORDER_NUMBER = re.compile(r"\b(?:order\s*#?\s*)?(\d{3,12})\b", re.I)
+_ORDER_NUMBER = re.compile(r"\border\s*#?\s*(\d{3,12})\b", re.I)
 _PRODUCT_QUERY = re.compile(
     r"\b(product|recommend|show|find|looking for|under|below|budget|"
     r"available|stock|cozy|home|office|style)\b",
     re.I,
 )
-if record_conflict:
-    results["record_conflict"] = True
 _STOCK_QUERY = re.compile(r"\b(stock|available|availability|in stock|out of stock)\b", re.I)
 _POLICY_QUERY = re.compile(
     r"\b(return|refund|cancel|replacement|delivery policy|payment policy|"
     r"damaged|privacy policy)\b",
     re.I,
 )
+_POLICY_STATUS_QUERY = re.compile(r"\b(refund|payment)\s+(status|query)\b", re.I)
 _ORDER_QUERY = re.compile(
-    r"\b(track|tracking|order status|delivery status|shipment|refund status|payment status)\b",
+    r"\b(track|tracking|order status|delivery status|shipment|refund status|payment status|"
+    r"refund query|return (?:my |your |the )?(?:order|item|purchase)|"
+    r"refund (?:my |the |for (?:my )?|on (?:my )?)?order|"
+    r"cancel (?:my |your |the )?order)\b",
+    re.I,
+)
+_CONFIRM_ACTION = re.compile(r"\b(submit|confirm|yes|go ahead|please proceed)\b", re.I)
+_RETURN_REQUEST = re.compile(
+    r"\b(return (?:my |your |the )?(?:order|item|purchase)|"
+    r"i want to return|start (?:a )?return|request (?:a )?return)\b",
+    re.I,
+)
+_REFUND_REQUEST = re.compile(
+    r"\b(request (?:a )?refund|i want (?:a )?refund|refund my order|"
+    r"get (?:a )?refund for (?:my )?order)\b",
+    re.I,
+)
+_CANCEL_REQUEST = re.compile(
+    r"\b(cancel (?:my |your |the )?order|i want to cancel|cancel this order)\b",
     re.I,
 )
 _CART_CONFIRM = re.compile(
@@ -41,6 +57,12 @@ _CART_CONFIRM = re.compile(
 )
 _CART_ASK = re.compile(r"\b(add|put)\b.*\b(cart|basket)\b", re.I)
 _TICKET_ASK = re.compile(r"\b(create|open|raise|submit)\b.*\b(ticket|case)\b", re.I)
+
+
+def _is_policy_question(message: str) -> bool:
+    return bool(_POLICY_QUERY.search(message)) and not bool(
+        _POLICY_STATUS_QUERY.search(message)
+    )
 
 
 def _as_json(value: Any) -> str:
@@ -173,9 +195,12 @@ def _make_langchain_tools(
         register("get_customer_history", "Read only the authenticated customer's own order history.", get_customer_history)
         if not tool_results.get("cart_update"):
             register("add_to_cart", "Add to the authenticated customer's cart only after explicit confirmation of the selected product.", add_to_cart)
-        if not tool_results.get("ticket"):
+        if (
+            not tool_results.get("ticket")
+            and _requested_order_action(request.message) is None
+        ):
             register("create_support_ticket", "Create a support ticket for the authenticated customer.", create_support_ticket)
-    if _PRODUCT_QUERY.search(request.message):
+    if is_safe_public_query(request.message):
         register("search_public_web", "Use DuckDuckGo only for generic public technology/product questions, never NovaCart data.", search_public_web)
         register("search_wikipedia", "Use Wikipedia only for generic public technology/product questions, never NovaCart data.", search_public_wikipedia)
     return built
@@ -186,6 +211,16 @@ def _get_order_id(request: AgentRequest) -> int | None:
         return request.order_id
     match = _ORDER_NUMBER.search(request.message)
     return int(match.group(1)) if match else None
+
+
+def _requested_order_action(message: str) -> str | None:
+    if _CANCEL_REQUEST.search(message):
+        return "cancel_request"
+    if _REFUND_REQUEST.search(message):
+        return "refund_request"
+    if _RETURN_REQUEST.search(message):
+        return "return_request"
+    return None
 
 
 def _deterministic_tools(
@@ -214,7 +249,13 @@ def _deterministic_tools(
             category=category,
             max_price=float(bounds.group(1).replace(",", "")) if bounds else None,
             min_rating=float(rating.group(1)) if rating else None,
-            in_stock=True if re.search(r"\bin stock\b", message, re.I) else False if re.search(r"\b(out of stock|unavailable)\b", message, re.I) else None,
+            in_stock=(
+                True
+                if re.search(r"\b(show|find|list)\b.*\b(products|items)\b.*\bin stock\b", message, re.I)
+                else False
+                if re.search(r"\b(show|find|list)\b.*\b(products|items)\b.*\b(out of stock|unavailable)\b", message, re.I)
+                else None
+            ),
         )
         if not result:
             result = business_tools.search_products(
@@ -222,7 +263,13 @@ def _deterministic_tools(
                 category=category,
                 max_price=float(bounds.group(1).replace(",", "")) if bounds else None,
                 min_rating=float(rating.group(1)) if rating else None,
-                in_stock=True if re.search(r"\bin stock\b", message, re.I) else False if re.search(r"\b(out of stock|unavailable)\b", message, re.I) else None,
+                in_stock=(
+                    True
+                    if re.search(r"\b(show|find|list)\b.*\b(products|items)\b.*\bin stock\b", message, re.I)
+                    else False
+                    if re.search(r"\b(show|find|list)\b.*\b(products|items)\b.*\b(out of stock|unavailable)\b", message, re.I)
+                    else None
+                ),
             )
         results["products"] = result
         tools_used.append("search_products")
@@ -255,8 +302,21 @@ def _deterministic_tools(
             results["products"] = matches
             tools_used.append("search_products")
 
-    if request.customer_id is not None and _ORDER_QUERY.search(message):
+    order_action = request.confirmed_action or _requested_order_action(message)
+    if request.customer_id is not None and (
+        _ORDER_QUERY.search(message) or order_action
+    ):
         order_id = _get_order_id(request)
+        if order_id is None:
+            history = business_tools.get_customer_history(
+                request.customer_id, request.customer_id
+            )
+            tools_used.append("get_customer_history")
+            if history:
+                order_id = int(history[0]["id"])
+                results["latest_order_selected"] = True
+            else:
+                results["order_lookup_failed"] = True
         if order_id is not None:
             results["order"] = business_tools.get_order_details(
                 request.customer_id, request.customer_id, order_id
@@ -269,13 +329,44 @@ def _deterministic_tools(
             )
             if results["order"] is None:
                 results["order_lookup_failed"] = True
+                if request.confirmed_action is not None:
+                    results["confirmation_invalid"] = True
             tools_used.extend(("get_order_details", "get_tracking_details", "get_payment_details"))
-        else:
-            results["order_id_required"] = True
-    elif _ORDER_QUERY.search(message):
+            if results["order"] is not None:
+                if order_action and request.confirmed_action is None:
+                    results["pending_action"] = order_action
+                elif request.confirmed_action is not None:
+                    if (
+                        request.confirmed_action != _requested_order_action(message)
+                        or not _CONFIRM_ACTION.search(message)
+                    ):
+                        results["confirmation_invalid"] = True
+                    else:
+                        action_label = {
+                            "return_request": "return",
+                            "refund_request": "refund",
+                            "cancel_request": "cancellation",
+                        }[request.confirmed_action]
+                        ticket_category = {
+                            "return_request": "return_request",
+                            "refund_request": "refund_delay",
+                            "cancel_request": "cancel_order",
+                        }[request.confirmed_action]
+                        ticket = business_tools.create_support_ticket(
+                            request.customer_id,
+                            request.customer_id,
+                            f"Customer confirmed a {action_label} request for order "
+                            f"#{order_id}. Customer message: {message}",
+                            ticket_category,
+                            "medium",
+                            order_id,
+                        )
+                        results["ticket"] = ticket
+                        tools_used.append("create_support_ticket")
+    elif _ORDER_QUERY.search(message) or order_action:
         results["authentication_required"] = True
 
-    if _POLICY_QUERY.search(message):
+    if _is_policy_question(message):
         policies = retrieve_policy_context(message)
         results["policies"] = policies
         tools_used.append("search_company_policy")
@@ -312,7 +403,6 @@ def _deterministic_tools(
 
 def _fallback_message(
     request: AgentRequest,
-    intent: str,
     results: dict[str, Any],
     escalation: dict[str, Any],
 ) -> str:
@@ -324,6 +414,38 @@ def _fallback_message(
         return "I could not find that order associated with your account."
     if results.get("record_conflict"):
         return "The order and payment records do not match, so I’m escalating this for human review."
+    if results.get("confirmation_invalid"):
+        return "I could not verify that confirmation. No request was submitted; please use the confirmation button for the order shown."
+    if results.get("ticket"):
+        ticket_id = results["ticket"]["id"]
+        order_id = (results.get("order") or {}).get("id")
+        order_text = f" for order #{order_id}" if order_id is not None else ""
+        return (
+            f"Your request{order_text} was submitted to support as ticket #{ticket_id}. "
+            "The order has not been canceled and no refund has "
+            "been issued."
+        )
+    if results.get("pending_action") and results.get("order"):
+        order = results["order"]
+        tracking = results.get("tracking") or {}
+        action_label = {
+            "return_request": "return",
+            "refund_request": "refund",
+            "cancel_request": "cancellation",
+        }[results["pending_action"]]
+        latest = "your latest " if results.get("latest_order_selected") else ""
+        eligibility_note = (
+            " I could not verify eligibility because no approved policy text was found."
+            if _is_policy_question(request.message) and not results.get("policies")
+            else " Support will confirm eligibility against the approved policy."
+        )
+        return (
+            f"I found {latest}order #{order['id']} (status: {order['status']}; "
+            f"shipment: {tracking.get('shipment_status') or 'not available'}). "
+            f"Confirm below to submit a {action_label} request to support. "
+            "Submitting a request does not itself cancel the order or issue a refund."
+            f"{eligibility_note}"
+        )
     if results.get("cart_update"):
         return f"{results['cart_update']['name']} was added to your cart. Continue to the secure checkout when you are ready."
     if results.get("pending_cart_item"):
@@ -337,15 +459,19 @@ def _fallback_message(
             return "I could not find that order on your account."
         tracking = results.get("tracking") or {}
         payment = results.get("payment") or {}
+        latest = "Your latest " if results.get("latest_order_selected") else ""
         return (
-            f"Order #{order['id']} is {order['status']}. "
+            f"{latest}order #{order['id']} is {order['status']}. "
             f"Shipment: {tracking.get('shipment_status') or 'not available'}. "
-            f"Payment: {payment.get('status') or 'not available'}."
+            f"Tracking ID: {tracking.get('tracking_id') or 'not available'}. "
+            f"Expected delivery: {tracking.get('expected_delivery') or 'not available'}. "
+            f"Payment: {payment.get('status') or 'not available'}. "
+            f"Refund: {payment.get('refund_status') or 'not available'}."
         )
     if results.get("policies"):
         policy = results["policies"][0]
         return f"According to our {policy['title']}, {policy['chunk_text']}"
-    if _POLICY_QUERY.search(request.message):
+    if _is_policy_question(request.message):
         return "I could not retrieve an approved policy document for this question, so I’m escalating it for review."
     if results.get("products"):
         if results.get("stock"):
@@ -376,7 +502,7 @@ def run_agent(request: AgentRequest) -> AgentResponse:
     _deterministic_tools(request, predictions["intent"], results, tools_used)
 
     confidence = float(predictions["intentConfidence"])
-    policy_found = not _POLICY_QUERY.search(request.message) or bool(results.get("policies"))
+    policy_found = not _is_policy_question(request.message) or bool(results.get("policies"))
     order = results.get("order")
     payment = results.get("payment")
     record_conflict = bool(
@@ -384,6 +510,18 @@ def run_agent(request: AgentRequest) -> AgentResponse:
         and payment
         and payment.get("amount") is not None
         and float(order["total"]) != float(payment["amount"])
+    )
+    if record_conflict:
+        results["record_conflict"] = True
+    settings = get_settings()
+    refund_amount_match = (
+        re.search(
+            r"\brefund\b[^\d₹$]*[₹$]?\s*([\d,]+(?:\.\d{1,2})?)",
+            request.message,
+            re.I,
+        )
+        if predictions["intent"] == "refund_delay"
+        else None
     )
     unresolved = _unresolved_count(request.customer_id)
     escalation = get_escalation_decision(
@@ -393,11 +531,37 @@ def run_agent(request: AgentRequest) -> AgentResponse:
         policy_found=policy_found,
         record_conflict=record_conflict,
         unresolved_tickets=unresolved,
+        refund_amount=(
+            float(refund_amount_match.group(1).replace(",", ""))
+            if refund_amount_match
+            else None
+        ),
+        refund_limit=settings.refund_auto_limit,
         negative=predictions["sentiment"] == "negative",
         repeatedly_unresolved=bool(
             re.search(r"\b(still unresolved|again|already contacted)\b", request.message, re.I)
         ),
     )
+
+    pending_action = results.get("pending_action")
+    unconfirmed_action = (
+        request.confirmed_action is None
+        and _requested_order_action(request.message) is not None
+    )
+    if (
+        unconfirmed_action
+        and escalation["escalationReason"]
+        in {
+            "no relevant approved policy found",
+            "classifier confidence below 0.70",
+        }
+    ):
+        results["deferred_escalation"] = escalation["escalationReason"]
+        escalation = {
+            "shouldEscalate": False,
+            "escalationReason": None,
+            "assignedTeam": None,
+        }
 
     ticket = results.get("ticket")
     if escalation["shouldEscalate"] and request.customer_id is not None and ticket is None:
@@ -422,35 +586,49 @@ def run_agent(request: AgentRequest) -> AgentResponse:
         )
         tools_used.append("escalate_ticket")
 
-    settings = get_settings()
     llm = create_llm(settings)
     context = {
         "verified_results": results,
         "internal_policy_chunks": results.get("policies", []),
     }
-    langchain_tools = _make_langchain_tools(request, results)
-    llm_message, agent_tool_names = invoke_tool_agent(
-        llm,
-        f"Use the available secure tools when needed. Verified facts: {_as_json(context)}\n"
-        f"Customer: {request.message}",
-        langchain_tools,
+    account_order_response = any(
+        results.get(key)
+        for key in (
+            "order",
+            "pending_action",
+            "ticket",
+            "order_lookup_failed",
+            "authentication_required",
+        )
     )
+    if account_order_response:
+        llm_message, agent_tool_names = None, []
+    else:
+        langchain_tools = _make_langchain_tools(request, results)
+        llm_message, agent_tool_names = invoke_tool_agent(
+            llm,
+            f"Use the available secure tools when needed. Verified facts: {_as_json(context)}\n"
+            f"Customer: {request.message}",
+            langchain_tools,
+        )
     tools_used.extend(name for name in agent_tool_names if name not in tools_used)
     must_use_grounded_fallback = (
-        (bool(_POLICY_QUERY.search(request.message)) and not results.get("policies"))
+        (_is_policy_question(request.message) and not results.get("policies"))
+        or bool(pending_action)
+        or bool(results.get("ticket"))
+        or bool(results.get("order"))
         or results.get("authentication_required")
         or results.get("order_id_required")
         or results.get("order_lookup_failed")
         or record_conflict
+        or (bool(_PRODUCT_QUERY.search(request.message)) and not results.get("products"))
         or bool(results.get("pending_cart_item"))
         or bool(results.get("cart_update"))
     )
     message = (
-        _fallback_message(request, predictions["intent"], results, escalation)
+        _fallback_message(request, results, escalation)
         if must_use_grounded_fallback
-        else llm_message or _fallback_message(
-        request, predictions["intent"], results, escalation
-        )
+        else llm_message or _fallback_message(request, results, escalation)
     )
 
     order_row = results.get("tracking") or results.get("order")
@@ -461,6 +639,7 @@ def run_agent(request: AgentRequest) -> AgentResponse:
             "status": str(order_row.get("status") or "unknown"),
             "total": float(results.get("order", {}).get("total") or 0),
             "payment_status": payment_row.get("status"),
+            "refund_status": payment_row.get("refund_status"),
             "shipment_status": order_row.get("shipment_status"),
             "tracking_id": order_row.get("tracking_id"),
             "expected_delivery": str(order_row["expected_delivery"])
@@ -519,6 +698,7 @@ def run_agent(request: AgentRequest) -> AgentResponse:
         actionType=action_type,
         products=product_rows,
         orderDetails=order_details,
+        pendingAction=results.get("pending_action"),
         shouldEscalate=escalation["shouldEscalate"],
         escalationReason=escalation["escalationReason"],
         assignedTeam=escalation["assignedTeam"],
