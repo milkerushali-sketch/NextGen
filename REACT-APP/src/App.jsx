@@ -78,7 +78,14 @@ function AppShell() {
             </ProtectedRoute>
           }
         />
-        <Route path="/orders" element={<OrdersPage />} />
+        <Route
+          path="/orders"
+          element={
+            <ProtectedRoute>
+              <OrdersPage />
+            </ProtectedRoute>
+          }
+        />
         <Route path="/product/:productId" element={<ProductDetails />} />
         <Route
           path="/profile"

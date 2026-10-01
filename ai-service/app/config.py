@@ -1,37 +1,44 @@
-import os
 from functools import lru_cache
+from pathlib import Path
 
 from dotenv import load_dotenv
-from pydantic import BaseModel, Field
+from pydantic import Field, SecretStr
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
-load_dotenv()
+load_dotenv(Path(__file__).parents[1] / ".env")
 
 
-class Settings(BaseModel):
+class Settings(BaseSettings):
     provider: str = Field(default="openai", alias="LLM_PROVIDER")
     model: str = Field(default="gpt-4o-mini", alias="LLM_MODEL")
-    openai_api_key: str = Field(default="", alias="OPENAI_API_KEY")
-    anthropic_api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")
-    database_url: str = Field(
-        default="postgresql://postgres:postgres@localhost:5432/novacart",
+    openai_api_key: SecretStr = Field(default=SecretStr(""), alias="OPENAI_API_KEY")
+    anthropic_api_key: SecretStr = Field(default=SecretStr(""), alias="ANTHROPIC_API_KEY")
+    database_url: SecretStr = Field(
+        default=SecretStr("postgresql://postgres:postgres@localhost:5432/novacart"),
         alias="DATABASE_URL",
     )
+    ai_service_token: SecretStr = Field(default=SecretStr(""), alias="AI_SERVICE_TOKEN")
+    embedding_model: str = Field(
+        default="sentence-transformers/all-mpnet-base-v2",
+        alias="POLICY_EMBEDDING_MODEL",
+    )
+    policy_min_similarity: float = Field(
+        default=0.35, alias="POLICY_MIN_SIMILARITY", ge=-1, le=1
+    )
+    refund_auto_limit: float = Field(default=1000.0, alias="REFUND_AUTO_LIMIT", gt=0)
     port: int = Field(default=8000, alias="AI_SERVICE_PORT")
 
-    model_config = {"populate_by_name": True}
+    model_config = SettingsConfigDict(
+        populate_by_name=True,
+        extra="ignore",
+        case_sensitive=False,
+    )
 
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings(
-        LLM_PROVIDER=os.getenv("LLM_PROVIDER", "openai"),
-        LLM_MODEL=os.getenv("LLM_MODEL", "gpt-4o-mini"),
-        OPENAI_API_KEY=os.getenv("OPENAI_API_KEY", ""),
-        ANTHROPIC_API_KEY=os.getenv("ANTHROPIC_API_KEY", ""),
-        DATABASE_URL=os.getenv(
-            "DATABASE_URL",
-            "postgresql://postgres:postgres@localhost:5432/novacart",
-        ),
-        AI_SERVICE_PORT=os.getenv("AI_SERVICE_PORT", "8000"),
-    )
+    return Settings()
 
+
+def configured_service_token() -> str:
+    return get_settings().ai_service_token.get_secret_value()

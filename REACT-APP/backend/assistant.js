@@ -1,5 +1,7 @@
 import express from "express";
 import dotenv from "dotenv";
+import { optionalAuth } from "./authMiddleware.js";
+import { requestAiAgent } from "./agentClient.js";
 
 dotenv.config();
 
@@ -23,9 +25,11 @@ const uniqueById = (items) => {
   });
 };
 
-const getHistoryKeywords = async (pool) => {
+const getHistoryKeywords = async (pool, customerId) => {
+  if (!customerId) return [];
   const { rows: recentChats } = await pool.query(
-    "SELECT query, response FROM chats ORDER BY created_at DESC LIMIT 20",
+    "SELECT query, response FROM chats WHERE user_id = $1 ORDER BY created_at DESC LIMIT 20",
+    [String(customerId)],
   );
   return recentChats.flatMap((entry) =>
     tokenize(`${entry.query} ${entry.response}`),
@@ -418,6 +422,7 @@ Rules:
 
 const assistantRouter = ({ pool }) => {
   const router = express.Router();
+  router.use(optionalAuth);
 
   router.post("/query", async (req, res) => {
   try {
@@ -428,21 +433,70 @@ const assistantRouter = ({ pool }) => {
         .json({ message: "A shopping question is required." });
     }
 
+    const priceBounds = getPriceBounds(message);
     const { rows: products } = await pool.query(
       "SELECT *, id AS _id FROM products ORDER BY rating DESC, reviews DESC LIMIT 100",
     );
+<<<<<<< HEAD
     const historyKeywords = await getHistoryKeywords(pool);
     const priceBounds = getPriceBounds(message);
+=======
+    const historyKeywords = await getHistoryKeywords(pool, req.auth?.userId);
+>>>>>>> fc728442fa7418242f93a91e9e06235a9a7ed00a
     const fallbackSet = buildRecommendationSet(
       message,
       products,
       historyKeywords,
     );
 
+    const aiAgentEnabled =
+      process.env.AI_AGENT_ENABLED === "true" ||
+      Boolean(process.env.AI_SERVICE_URL);
+    if (aiAgentEnabled) {
+      try {
+        const agentResult = await requestAiAgent({
+          message,
+          orderId: req.body?.orderId,
+          customer: req.auth,
+          confirmedProductId: req.body?.confirmedProductId,
+          confirmedAction: req.body?.confirmedAction,
+          quantity: req.body?.quantity,
+        });
+        const recommendations = (agentResult.products || []).map((product) => ({
+          ...product,
+          id: product.id ?? product.product_id,
+          _id: String(product.id ?? product.product_id),
+        }));
+        const legacy = {
+          ...agentResult,
+          answer: agentResult.message,
+          intent: agentResult.intent,
+          recommendations,
+          faqs: [],
+          similarProducts: [],
+        };
+        await pool.query(
+          `INSERT INTO chats (user_id, user_email, query, response, intent, recommendations)
+           VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
+          [
+            req.auth?.userId ? String(req.auth.userId) : null,
+            req.auth?.email || "guest",
+            message,
+            legacy.answer,
+            legacy.intent || "shopping-help",
+            JSON.stringify(recommendations),
+          ],
+        );
+        return res.json(legacy);
+      } catch (error) {
+        console.warn("NovaCart AI service unavailable; using existing assistant:", error.message);
+      }
+    }
+
     let answerSet = fallbackSet;
 
     try {
-      const userName = req.body?.context?.userName || "Shopper";
+      const userName = req.auth?.name || "Shopper";
       const recentPurchases = Array.isArray(req.body?.context?.recentPurchases)
         ? req.body.context.recentPurchases
         : [];
@@ -480,8 +534,8 @@ const assistantRouter = ({ pool }) => {
       `INSERT INTO chats (user_id, user_email, query, response, intent, recommendations)
        VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
       [
-        req.body?.userId || null,
-        req.body?.email || "guest",
+        req.auth?.userId ? String(req.auth.userId) : null,
+        req.auth?.email || "guest",
         message,
         answerSet.answer,
         answerSet.intent,
@@ -496,10 +550,9 @@ const assistantRouter = ({ pool }) => {
       intent: answerSet.intent,
       similarProducts: answerSet.similarProducts,
     });
-  } catch (error) {
+  } catch {
     return res.status(500).json({
       message: "Unable to generate recommendations right now.",
-      error: error.message,
     });
   }
   });

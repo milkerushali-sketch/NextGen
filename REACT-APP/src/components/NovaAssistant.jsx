@@ -1,9 +1,14 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { FaCommentDots, FaPaperPlane, FaRobot, FaTimes } from "react-icons/fa";
 import { useAuth } from "../context/AuthContext";
-import { apiUrl, authHeaders } from "../config/api";
+import { apiEndpoints, apiUrl, authHeaders } from "../config/api";
 import { useNavigate } from "react-router-dom";
+import ProductCard from "./ProductCard";
+import OrderTrackingCard from "./OrderTrackingCard";
+import TicketStatusCard from "./TicketStatusCard";
+import PolicyCard from "./PolicyCard";
+import EscalationCard from "./EscalationCard";
 
 const shopProducts = [
   {
@@ -106,6 +111,11 @@ const getFaqFallback = (message) => {
 };
 
 const getDisplayName = (user) => user?.name || "there";
+const requestActionLabels = {
+  return_request: "return",
+  refund_request: "refund",
+  cancel_request: "cancellation",
+};
 
 const buildWelcomeMessages = (user) => {
   const name = getDisplayName(user);
@@ -117,22 +127,6 @@ const buildWelcomeMessages = (user) => {
       text: `${greeting}\nI’m Nova AI, your friendly NovaCart shopkeeper. Tell me what you need, ask for a gift, or just browse — I’ll recommend, upsell gently, and help you check out.\nAre you shopping for yourself or someone else? You can also tap an option below 👇`,
     },
   ];
-};
-
-const getRecentPurchases = (user) => {
-  if (!user?.email) return [];
-
-  try {
-    const saved = localStorage.getItem("novacart-purchases");
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      if (Array.isArray(parsed) && parsed.length) return parsed;
-    }
-  } catch {
-    // fallback to default data if storage is unavailable
-  }
-
-  return [];
 };
 
 const pickShopRecs = (ids) =>
@@ -243,16 +237,25 @@ export default function NovaAssistant({
     return buildWelcomeMessages(null);
   });
   const [isLoading, setIsLoading] = useState(false);
+  const messagesEndRef = useRef(null);
+  const previousMessageCount = useRef(messages.length);
 
   const isOpen = controlledOpen ?? internalOpen;
 
-  const setIsOpen = (value) => {
+  useEffect(() => {
+    if (messages.length > previousMessageCount.current) {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    }
+    previousMessageCount.current = messages.length;
+  }, [messages.length]);
+
+  const setIsOpen = useCallback((value) => {
     if (onOpenChange) {
       onOpenChange(value);
       return;
     }
     setInternalOpen(value);
-  };
+  }, [onOpenChange]);
 
   useEffect(() => {
     const handleAssistantOpen = () => {
@@ -263,7 +266,7 @@ export default function NovaAssistant({
     return () => {
       window.removeEventListener("open-nova-assistant", handleAssistantOpen);
     };
-  }, [onOpenChange]);
+  }, [setIsOpen]);
 
   useEffect(() => {
     const handleAssistantTopic = (event) => {
@@ -307,7 +310,7 @@ export default function NovaAssistant({
     }
   };
 
-  const sendMessage = async (message) => {
+  const sendMessage = async (message, confirmation = {}) => {
     const userMessage = { sender: "user", text: message };
     setMessages((current) => [...current, userMessage]);
     setInput("");
@@ -316,17 +319,21 @@ export default function NovaAssistant({
     const fallbackReply = getShopkeeperFallback(message);
 
     try {
-      const response = await fetch(apiUrl("/api/agent/query"), {
+      const response = await fetch(apiUrl(apiEndpoints.agentQuery), {
         method: "POST",
         headers: authHeaders(token),
         body: JSON.stringify({
           message,
-          userId: user?.id || null,
-          email: user?.email || "guest",
-          context: {
-            userName: user?.name || "Shopper",
-            recentPurchases: getRecentPurchases(user),
-          },
+          ...(confirmation.orderId ? { orderId: confirmation.orderId } : {}),
+          ...(confirmation.confirmedAction
+            ? { confirmedAction: confirmation.confirmedAction }
+            : {}),
+          ...(confirmation.confirmedProductId
+            ? {
+                confirmedProductId: confirmation.confirmedProductId,
+                quantity: confirmation.quantity || 1,
+              }
+            : {}),
         }),
       });
 
@@ -336,10 +343,16 @@ export default function NovaAssistant({
 
       const data = await response.json();
       const botReply =
-        typeof data.answer === "string" ? data.answer : fallbackReply.text;
+        typeof data.message === "string"
+          ? data.message
+          : typeof data.answer === "string"
+            ? data.answer
+            : fallbackReply.text;
 
-      const recommendations = Array.isArray(data.recommendations)
-        ? data.recommendations.slice(0, 3)
+      const recommendations = Array.isArray(data.products) && data.products.length
+        ? data.products.slice(0, 3)
+        : Array.isArray(data.recommendations)
+          ? data.recommendations.slice(0, 3)
         : fallbackReply.recommendations;
 
       setMessages((current) => [
@@ -348,16 +361,30 @@ export default function NovaAssistant({
           sender: "bot",
           text: botReply,
           recommendations,
-          shouldEscalate: Boolean(data.should_escalate),
+          actionType: data.actionType || data.action_type,
+          orderDetails: data.orderDetails || data.order_details || null,
+          pendingAction: data.pendingAction || data.pending_action || null,
+          policyReference: data.policyReference || data.policy_reference || null,
+          ticketId: data.ticketId || data.ticket_id || null,
+          assignedTeam: data.assignedTeam || data.assigned_team || null,
+          escalationReason: data.escalationReason || data.escalation_reason || null,
+          toolsUsed: data.toolsUsed || data.tools_used || [],
+          shouldEscalate: Boolean(data.shouldEscalate ?? data.should_escalate),
         },
       ]);
     } catch {
+      const accountOrderQuestion =
+        /\b(track|tracking|order|return|refund|cancel|payment)\b/i.test(message);
       setMessages((current) => [
         ...current,
         {
           sender: "bot",
-          text: fallbackReply.text,
-          recommendations: fallbackReply.recommendations,
+          text: accountOrderQuestion
+            ? "I couldn’t connect to the secure order service, so I couldn’t verify your order. Please try again shortly or open Orders to view your account details."
+            : fallbackReply.text,
+          recommendations: accountOrderQuestion
+            ? []
+            : fallbackReply.recommendations,
         },
       ]);
     } finally {
@@ -383,7 +410,7 @@ export default function NovaAssistant({
   );
 
   return (
-    <div className="fixed bottom-5 right-5 z-50">
+    <div className="fixed bottom-2 right-2 z-50 sm:bottom-5 sm:right-5">
       <AnimatePresence>
         {isOpen && (
           <motion.div
@@ -391,7 +418,7 @@ export default function NovaAssistant({
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 20, scale: 0.96 }}
             transition={{ duration: 0.25 }}
-            className="mb-4 w-[360px] overflow-hidden rounded-[30px] border border-slate-200 bg-white shadow-[0_30px_90px_rgba(15,23,42,0.22)] dark:border-slate-800 dark:bg-slate-900"
+            className="mb-2 flex h-[min(720px,calc(100dvh-1rem))] w-[min(420px,calc(100vw-1rem))] flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_30px_90px_rgba(15,23,42,0.22)] dark:border-slate-700 dark:bg-slate-900 sm:mb-4"
           >
             <div className="flex items-center justify-between bg-gradient-to-r from-violet-600 to-indigo-600 px-4 py-3 text-white">
               <div className="flex items-center gap-3">
@@ -424,19 +451,121 @@ export default function NovaAssistant({
               </button>
             </div>
 
-            <div className="chat-scrollbar max-h-80 space-y-3 overflow-y-auto bg-slate-50 p-4 dark:bg-slate-950/60">
+            <div
+              className="chat-scrollbar min-h-0 flex-1 space-y-3 overflow-y-auto bg-slate-50 p-4 dark:bg-slate-950/60"
+              aria-live="polite"
+            >
               {messages.map((message, index) => (
                 <div
                   key={`${message.sender}-${index}`}
-                  className={`max-w-[88%] rounded-2xl px-3 py-2 text-sm whitespace-pre-line ${
+                  className={`max-w-[94%] break-words rounded-2xl px-4 py-3 text-base leading-6 whitespace-pre-line ${
                     message.sender === "bot"
-                      ? "bg-white text-slate-700 shadow-sm dark:bg-slate-800 dark:text-slate-200"
+                      ? "bg-white text-slate-800 shadow-sm dark:bg-slate-800 dark:text-slate-100"
                       : "ml-auto bg-violet-600 text-white"
                   }`}
                 >
                   {message.text}
+                  {message.sender === "bot" &&
+                    message.actionType === "product_search" &&
+                    message.recommendations?.length > 0 && (
+                      <div className="mt-3 grid gap-3">
+                        {message.recommendations.map((product) => (
+                          <ProductCard key={product.id || product._id} product={{
+                            ...product,
+                            id: product.id ?? product._id,
+                            _id: product._id ?? String(product.id),
+                          }} />
+                        ))}
+                      </div>
+                    )}
+                  {message.sender === "bot" && message.orderDetails && (
+                    <div className="mt-3">
+                      <OrderTrackingCard order={message.orderDetails} />
+                    </div>
+                  )}
+                  {message.sender === "bot" &&
+                    message.pendingAction &&
+                    message.orderDetails?.id && (
+                      <button
+                        type="button"
+                        disabled={isLoading || !isAuthenticated}
+                        onClick={() =>
+                          sendMessage(
+                            `Please confirm and submit my request to ${
+                              message.pendingAction === "cancel_request"
+                                ? "cancel"
+                                : message.pendingAction === "refund_request"
+                                  ? "request a refund for"
+                                  : "return"
+                            } my order #${message.orderDetails.id}`,
+                            {
+                              confirmedAction: message.pendingAction,
+                              orderId: message.orderDetails.id,
+                            },
+                          )
+                        }
+                        className="mt-3 w-full rounded-xl bg-violet-600 px-4 py-3 text-base font-semibold leading-6 text-white hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        Confirm and submit {requestActionLabels[message.pendingAction]} request
+                      </button>
+                    )}
+                  {message.sender === "bot" && message.policyReference && (
+                    <div className="mt-3">
+                      <PolicyCard title={message.policyReference}>
+                        {message.text}
+                      </PolicyCard>
+                    </div>
+                  )}
+                  {message.sender === "bot" && message.ticketId && (
+                    <div className="mt-3">
+                      <TicketStatusCard ticket={{
+                        id: message.ticketId,
+                        subject: `Support ticket #${message.ticketId}`,
+                        status: message.shouldEscalate ? "escalated" : "open",
+                        priority: "medium",
+                        description: message.text,
+                      }} />
+                    </div>
+                  )}
+                  {message.sender === "bot" && message.shouldEscalate && (
+                    <div className="mt-3">
+                      <EscalationCard
+                        reason={message.escalationReason}
+                        assignedTeam={message.assignedTeam}
+                        ticketId={message.ticketId}
+                      />
+                    </div>
+                  )}
+                  {message.sender === "bot" &&
+                    message.actionType === "cart_update" &&
+                    message.toolsUsed?.includes("get_product_details") &&
+                    message.recommendations?.[0] && (
+                      <button
+                        type="button"
+                        disabled={isLoading || !isAuthenticated}
+                        onClick={() =>
+                          sendMessage("Yes, add it to my cart", {
+                            confirmedProductId: message.recommendations[0].id,
+                          })
+                        }
+                        className="mt-3 w-full rounded-xl bg-violet-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                      >
+                        {isAuthenticated ? "Confirm add to cart" : "Sign in to add to cart"}
+                      </button>
+                    )}
+                  {message.sender === "bot" &&
+                    message.actionType === "cart_update" &&
+                    message.toolsUsed?.includes("add_to_cart") && (
+                      <button
+                        type="button"
+                        onClick={() => navigate("/cart")}
+                        className="mt-3 w-full rounded-xl bg-violet-600 px-3 py-2 text-sm font-semibold text-white"
+                      >
+                        Continue to cart and secure checkout
+                      </button>
+                    )}
                   {message.recommendations?.length > 0 && (
-                    <div className="mt-3 space-y-2">
+                    <div className={`mt-3 space-y-2 ${message.actionType === "product_search" ? "hidden" : ""}`}>
                       <div className="text-xs font-bold uppercase tracking-[0.16em] text-violet-500">
                         Recommended for you
                       </div>
@@ -467,13 +596,15 @@ export default function NovaAssistant({
                       key={option}
                       type="button"
                       onClick={() => handleQuickOption(option)}
-                      className="w-full rounded-2xl border border-violet-200 bg-violet-50 px-3 py-2 text-left text-sm font-medium text-violet-700 transition hover:bg-violet-100 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-200"
+                      className="w-full rounded-2xl border border-violet-200 bg-violet-50 px-4 py-3 text-left text-base font-semibold leading-6 text-violet-800 transition hover:bg-violet-100 dark:border-violet-400/50 dark:bg-violet-950 dark:text-violet-100 dark:hover:bg-violet-900"
                     >
                       {option}
                     </button>
                   ))}
                 </div>
               )}
+
+              <div ref={messagesEndRef} className="h-px" />
 
               {(messages.length > 1 || !isAuthenticated) && (
                 <button
@@ -493,8 +624,8 @@ export default function NovaAssistant({
               <input
                 value={input}
                 onChange={(event) => setInput(event.target.value)}
-                placeholder="Ask for recommendations..."
-                className="flex-1 rounded-full border border-slate-200 bg-slate-50 px-4 py-2 text-sm text-slate-700 outline-none placeholder:text-slate-400 focus:border-violet-400 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                placeholder="Ask about products, orders, returns..."
+                className="min-w-0 flex-1 rounded-full border border-slate-300 bg-slate-50 px-4 py-3 text-base text-slate-800 outline-none placeholder:text-slate-500 focus:border-violet-500 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:placeholder:text-slate-400"
               />
               <button
                 type="submit"

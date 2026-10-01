@@ -15,8 +15,7 @@ dist-ssr
 .env.*
 !.env.example
 
-# Keep environment files, text files, and local Python environments out of pushes.
-.env.example
+# Keep real environment files, text files, and local Python environments out of pushes.
 *.txt
 agent-env/
 **/agent-env/
