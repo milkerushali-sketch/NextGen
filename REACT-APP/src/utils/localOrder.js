@@ -1,3 +1,10 @@
+export const DEMO_DELIVERY_LOCATION = {
+  city: "Nagpur, Maharashtra",
+  latitude: 21.1458,
+  longitude: 79.0882,
+  source: "demo",
+};
+
 export const getLocalOrders = () => {
   if (typeof window === "undefined") return [];
 
@@ -28,6 +35,10 @@ export const createLocalOrder = (items, total) => {
     trackingId: `TRK-${orderId.slice(-6)}`,
     carrier: "NovaCart Dispatch",
     expectedDelivery: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
+    deliveryLocation: {
+      ...DEMO_DELIVERY_LOCATION,
+      updatedAt: createdAt,
+    },
     paymentStatus: "pending",
     refundStatus: null,
     items: items.map((item) => ({

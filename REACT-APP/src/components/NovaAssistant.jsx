@@ -253,6 +253,12 @@ const buildDummyAssistantResponse = (message) => {
 
 const getShopkeeperFallback = (message) => {
   const lower = message.toLowerCase();
+  if (/^(?:hi+|hello+|hey+|good morning|good afternoon|good evening|greetings)(?:\s+(?:there|nova|novacart|team))?[\s!.,?]*$/i.test(lower)) {
+    return {
+      text: "Hello! 👋 I’m Nova AI. What can I help you with today: finding a product, checking an order, or handling a return or refund?",
+      recommendations: [],
+    };
+  }
   const faqReply = getFaqFallback(message);
 
   if (faqReply) return faqReply;

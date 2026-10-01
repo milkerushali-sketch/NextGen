@@ -44,6 +44,8 @@ test("refund status is reported without changing the saved order", () => {
 
   assert.match(result.message, /Payment: pending/);
   assert.match(result.message, /Refund: none recorded/);
+  assert.equal(result.orderDetails.deliveryLocation.city, "Nagpur, Maharashtra");
+  assert.equal(result.orderDetails.deliveryLocation.source, "demo");
   assert.equal(result.orders[0].status, "processing");
 });
 

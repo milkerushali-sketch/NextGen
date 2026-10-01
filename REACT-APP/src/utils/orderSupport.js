@@ -1,3 +1,5 @@
+import { DEMO_DELIVERY_LOCATION } from "./localOrder.js";
+
 const classifyOrderIntent = (message) => {
   const text = String(message || "");
   if (/\b(cancel|cancellation)\b/i.test(text)) return "cancel_request";
@@ -63,6 +65,10 @@ const getOrderDetails = (order) => ({
   paymentStatus: order.paymentStatus || "not available",
   refundStatus: order.refundStatus || "none recorded",
   returnStatus: order.returnStatus || null,
+  deliveryLocation: order.deliveryLocation || {
+    ...DEMO_DELIVERY_LOCATION,
+    updatedAt: order.createdAt || null,
+  },
 });
 
 const requestActionLabel = {
