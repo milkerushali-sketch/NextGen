@@ -1,6 +1,9 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { FaShoppingCart, FaStar } from "react-icons/fa";
-import { handleProductImageError } from "../utils/productImage";
+import {
+  handleProductImageError,
+  sanitizeProductImageUrl,
+} from "../utils/productImage";
 
 export default function CartModal({ product, isOpen, onClose, onConfirm }) {
   if (!product) return null;
@@ -43,7 +46,7 @@ export default function CartModal({ product, isOpen, onClose, onConfirm }) {
             <div className="p-6">
               <div className="flex gap-4 rounded-[24px] border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950/60">
                 <img
-                  src={product.image}
+                  src={sanitizeProductImageUrl(product.image, product.name)}
                   alt={product.name}
                   onError={handleProductImageError}
                   className="h-28 w-24 rounded-2xl object-cover"

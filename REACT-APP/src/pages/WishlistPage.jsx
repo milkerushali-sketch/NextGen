@@ -1,6 +1,9 @@
 import { Link } from "react-router-dom";
 import { useWishlist } from "../context/WishlistContext";
-import { handleProductImageError } from "../utils/productImage";
+import {
+  handleProductImageError,
+  sanitizeProductImageUrl,
+} from "../utils/productImage";
 
 export default function WishlistPage() {
   const { items, removeFromWishlist } = useWishlist();
@@ -36,7 +39,7 @@ export default function WishlistPage() {
             className="overflow-hidden rounded-[28px] border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900"
           >
             <img
-              src={product.image}
+              src={sanitizeProductImageUrl(product.image, product.name)}
               alt={product.name}
               onError={handleProductImageError}
               className="h-64 w-full rounded-2xl object-cover"

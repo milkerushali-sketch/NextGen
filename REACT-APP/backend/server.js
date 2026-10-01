@@ -4,8 +4,14 @@ import dotenv from "dotenv";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import pg from "pg";
+import fs from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { assistantRouter } from "./assistant.js";
 import { agentRouter } from "./agentRoutes.js";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 dotenv.config();
 
@@ -97,10 +103,79 @@ const seedUsers = async () => {
   );
 };
 
-const seedProducts = async () => {
-  const { rows } = await pool.query("SELECT COUNT(*)::int AS count FROM products");
-  if (rows[0].count > 0) return;
-  const products = [
+const parseCsvRow = (line) => {
+  const cells = [];
+  let current = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i += 1) {
+    const char = line[i];
+    const next = line[i + 1];
+
+    if (char === '"') {
+      if (inQuotes && next === '"') {
+        current += '"';
+        i += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+
+    if (char === "," && !inQuotes) {
+      cells.push(current);
+      current = "";
+      continue;
+    }
+
+    current += char;
+  }
+
+  cells.push(current);
+  return cells.map((cell) => cell.replace(/^\s+|\s+$/g, "").replace(/""/g, '"'));
+};
+
+const parseArchiveProducts = async () => {
+  const archiveDir = path.join(__dirname, "..", "archive");
+  const files = (await fs.readdir(archiveDir))
+    .filter((file) => file.toLowerCase().endsWith(".csv") && file.toLowerCase() !== "combined_dataset.csv")
+    .sort();
+
+  const rows = [];
+
+  for (const file of files) {
+    const filePath = path.join(archiveDir, file);
+    const content = await fs.readFile(filePath, "utf8");
+    const lines = content.split(/\r?\n/).filter((line) => line.trim());
+
+    if (lines.length < 2) continue;
+
+    const headers = parseCsvRow(lines[0]).map((header) => header.trim().toLowerCase().replace(/\s+/g, "_"));
+
+    for (let i = 1; i < lines.length; i += 1) {
+      const values = parseCsvRow(lines[i]);
+      const row = Object.fromEntries(headers.map((header, index) => [header, values[index] ?? ""]));
+
+      if (!row.title && !row.product_id && !row.product_description) continue;
+      if (!row.final_price && !row.initial_price && !row.price) continue;
+
+      rows.push({
+        fileName: file,
+        ...row,
+      });
+    }
+  }
+
+  return rows;
+};
+
+const safeNumber = (value, fallback = 0) => {
+  const numeric = Number(String(value || "").replace(/[^0-9.\-]/g, ""));
+  return Number.isFinite(numeric) ? numeric : fallback;
+};
+
+const buildProductSeed = async () => {
+  const staticProducts = [
     ["Aero X Headphones", "Audio", 249, 4.8, "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?auto=format&fit=crop&w=900&q=80", "Immersive wireless headphones with a comfortable premium fit.", 151],
     ["Nova Smartwatch", "Wearables", 199, 4.7, "https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&w=900&q=80", "A sleek smartwatch for everyday activity and notifications.", 128],
     ["Beam Pro Speaker", "Smart Devices", 179, 4.6, "https://images.unsplash.com/photo-1608043152269-423dbba4e7e1?auto=format&fit=crop&w=900&q=80", "Room-filling sound in a compact, modern design.", 84],
@@ -108,11 +183,59 @@ const seedProducts = async () => {
     ["Pulse Earbuds", "Audio", 159, 4.5, "https://images.unsplash.com/photo-1606220945770-b5b6c2c55bf1?auto=format&fit=crop&w=900&q=80", "Compact wireless earbuds with clear sound for daily listening.", 112],
     ["Glow Desk Lamp", "Workspace", 89, 4.7, "https://images.unsplash.com/photo-1507473885765-e6ed057f782c?auto=format&fit=crop&w=900&q=80", "Warm adjustable lighting for work, reading, and relaxing.", 63],
   ];
+
+  try {
+    const archiveRows = await parseArchiveProducts();
+    const datasetProducts = archiveRows
+      .map((row) => {
+        const title = (row.title || row.product_name || row.name || "Untitled Product").trim();
+        const category = (row.category || row.breadcrumbs || row.fileName || "General").trim();
+        const price = safeNumber(row.final_price || row.price || row.initial_price, 0);
+        const oldPrice = safeNumber(row.initial_price || row.final_price || row.price, price);
+        const rating = Math.min(5, Math.max(1, safeNumber(row.rating, 4.4)));
+        const reviews = Math.max(0, Math.round(safeNumber(row.ratings_count, 50)));
+        const images = String(row.images || "").split(",").map((item) => item.trim().replace(/^"|"$/g, "")).filter(Boolean);
+        const description = (row.product_description || row.product_details || row.description || "Popular catalog find").trim();
+        const tags = [category, title, row.seller_name || "", row.product_details || ""]
+          .flatMap((value) => String(value).split(/\s+/))
+          .filter((tag) => tag && tag.length > 2)
+          .slice(0, 8);
+
+        if (!title || !price) return null;
+
+        return [
+          title,
+          category || "General",
+          Number(price.toFixed(2)),
+          Number(rating.toFixed(1)),
+          images[0] || "https://images.unsplash.com/photo-1521572267360-ee0c2909d518?auto=format&fit=crop&w=900&q=80",
+          description.length > 400 ? `${description.slice(0, 397)}...` : description,
+          reviews,
+          Number(oldPrice.toFixed(2)),
+          tags,
+        ];
+      })
+      .filter(Boolean)
+      .slice(0, 120);
+
+    return [...staticProducts, ...datasetProducts];
+  } catch {
+    return staticProducts;
+  }
+};
+
+const seedProducts = async () => {
+  const { rows } = await pool.query("SELECT COUNT(*)::int AS count FROM products");
+  if (rows[0].count > 0) return;
+
+  const products = await buildProductSeed();
+
   for (const product of products) {
+    const [name, category, price, rating, image, description, reviews, oldPrice, tags] = product;
     await pool.query(
-      `INSERT INTO products (name, category, price, rating, image, description, reviews)
-       VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-      product,
+      `INSERT INTO products (name, category, price, rating, image, description, reviews, old_price, tags)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+      [name, category, price, rating, image, description, reviews, oldPrice || price, tags || []],
     );
   }
 };

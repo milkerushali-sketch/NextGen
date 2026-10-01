@@ -4,7 +4,10 @@ import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useCart } from "../context/CartContext";
 import { useAuth } from "../context/AuthContext";
 import { apiUrl } from "../config/api";
-import { handleProductImageError } from "../utils/productImage";
+import {
+  handleProductImageError,
+  sanitizeProductImageUrl,
+} from "../utils/productImage";
 
 export default function ProductDetails() {
   const { productId } = useParams();
@@ -112,7 +115,7 @@ export default function ProductDetails() {
       </button>
       <div className="grid gap-10 overflow-hidden rounded-[32px] border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900 md:grid-cols-2 md:p-8">
         <img
-          src={product.image}
+          src={sanitizeProductImageUrl(product.image, product.name)}
           alt={product.name}
           onError={handleProductImageError}
           className="h-full min-h-80 w-full rounded-[24px] object-cover"

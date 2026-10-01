@@ -6,7 +6,10 @@ import { useAuth } from "../context/AuthContext";
 import { useCart } from "../context/CartContext";
 import { useWishlist } from "../context/WishlistContext";
 import { apiUrl } from "../config/api";
-import { handleProductImageError } from "../utils/productImage";
+import {
+  handleProductImageError,
+  sanitizeProductImageUrl,
+} from "../utils/productImage";
 import CartModal from "./CartModal";
 import Product3DView from "./Product3DView";
 import WishlistButton from "./WishlistButton";
@@ -75,7 +78,7 @@ export default function ProductCard({ product }) {
       >
         <div className="relative overflow-hidden">
           <img
-            src={product.image}
+            src={sanitizeProductImageUrl(product.image, product.name)}
             alt={product.name}
             onError={handleProductImageError}
             className="h-72 w-full object-cover"
