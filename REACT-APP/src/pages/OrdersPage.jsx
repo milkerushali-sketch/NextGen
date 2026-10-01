@@ -1,25 +1,51 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import OrderTrackingCard from "../components/OrderTrackingCard";
 import { apiEndpoints, apiUrl, authHeaders } from "../config/api";
 import { useAuth } from "../context/AuthContext";
+import { getLocalOrders } from "../utils/localOrder";
 
 export default function OrdersPage() {
   const { token } = useAuth();
+  const location = useLocation();
   const [orders, setOrders] = useState([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const successMessage = location.state?.message;
 
   useEffect(() => {
     let active = true;
+    const fallbackOrders = getLocalOrders();
+
+    if (!token) {
+      if (active) {
+        setOrders(fallbackOrders);
+        setError("");
+      }
+      if (active) setLoading(false);
+      return () => {
+        active = false;
+      };
+    }
+
     fetch(apiUrl(apiEndpoints.orders), { headers: authHeaders(token) })
       .then(async (response) => {
         const data = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(data.message || "Unable to load your orders.");
-        if (active) setOrders(Array.isArray(data) ? data : []);
+        if (!response.ok) {
+          if (active) {
+            setOrders(fallbackOrders);
+            setError(data.message || "Unable to load your orders.");
+          }
+          return;
+        }
+
+        if (active) setOrders(Array.isArray(data) ? data : fallbackOrders);
       })
-      .catch((requestError) => {
-        if (active) setError(requestError.message || "Unable to load your orders.");
+      .catch(() => {
+        if (active) {
+          setOrders(fallbackOrders);
+          setError("");
+        }
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -47,6 +73,11 @@ export default function OrdersPage() {
           Continue shopping
         </Link>
       </div>
+      {successMessage && (
+        <p className="mt-6 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300">
+          {successMessage}
+        </p>
+      )}
       <div className="mt-10 space-y-4">
         {loading && <p role="status" className="text-slate-500">Loading your orders...</p>}
         {error && <p role="alert" className="text-red-600">{error}</p>}

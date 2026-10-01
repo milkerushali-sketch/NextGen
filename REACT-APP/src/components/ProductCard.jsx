@@ -5,16 +5,11 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { useCart } from "../context/CartContext";
 import { useWishlist } from "../context/WishlistContext";
-<<<<<<< HEAD
-import { apiUrl } from "../config/api";
+import { apiEndpoints, apiUrl, authHeaders } from "../config/api";
 import {
   handleProductImageError,
   sanitizeProductImageUrl,
 } from "../utils/productImage";
-=======
-import { apiEndpoints, apiUrl, authHeaders } from "../config/api";
-import { handleProductImageError } from "../utils/productImage";
->>>>>>> fc728442fa7418242f93a91e9e06235a9a7ed00a
 import CartModal from "./CartModal";
 import Product3DView from "./Product3DView";
 import WishlistButton from "./WishlistButton";
@@ -28,20 +23,27 @@ export default function ProductCard({ product }) {
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [isAdding, setIsAdding] = useState(false);
   const [cartError, setCartError] = useState("");
+  const [cartAdded, setCartAdded] = useState(false);
   const isWishlisted = items.some((item) => item.id === product.id);
 
-  const handleBuyNow = () => {
-    if (!isAuthenticated) {
-      navigate("/login");
-      return;
-    }
+  const handleAddClick = () => {
     setCartError("");
+    setCartAdded(false);
     setIsCartOpen(true);
   };
 
   const handleConfirmAdd = async () => {
     setIsAdding(true);
     setCartError("");
+
+    if (!isAuthenticated || !token) {
+      addToCart(product);
+      setIsCartOpen(false);
+      setCartAdded(true);
+      setIsAdding(false);
+      return;
+    }
+
     try {
       const response = await fetch(apiUrl(apiEndpoints.addToCart), {
         method: "POST",
@@ -56,7 +58,10 @@ export default function ProductCard({ product }) {
       setIsCartOpen(false);
       navigate("/cart");
     } catch (error) {
+      addToCart(product);
       setCartError(error.message || "Unable to add this product to your cart.");
+      setIsCartOpen(false);
+      navigate("/cart");
     } finally {
       setIsAdding(false);
     }
@@ -126,9 +131,10 @@ export default function ProductCard({ product }) {
             </div>
             <button
               type="button"
-              onClick={handleBuyNow}
+              onClick={handleAddClick}
               className="rounded-full bg-violet-500 p-3 text-white transition hover:bg-violet-400"
               aria-label={`Add ${product.name} to cart`}
+              title={`Add ${product.name} to cart`}
             >
               <FaShoppingCart />
             </button>
@@ -136,6 +142,11 @@ export default function ProductCard({ product }) {
           <p className="line-clamp-2 text-sm text-slate-600 dark:text-slate-300">
             {product.description}
           </p>
+          {cartAdded && (
+            <p role="status" className="text-sm font-semibold text-emerald-600 dark:text-emerald-400">
+              Added to your cart.
+            </p>
+          )}
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <span className="text-2xl font-black text-slate-900 dark:text-white">

@@ -15,6 +15,7 @@ import {
 } from "react-icons/fa";
 import ProductCard from "../components/ProductCard";
 import { useNavigate } from "react-router-dom";
+import { useCart } from "../context/CartContext";
 
 const categories = [
   {
@@ -116,6 +117,7 @@ const purchaseHistory = ["Smartwatch", "Wireless Earbuds", "Laptop Stand"];
 
 export default function Home() {
   const navigate = useNavigate();
+  const { addToCart } = useCart();
   const [selectedCategory, setSelectedCategory] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("");
@@ -253,6 +255,10 @@ export default function Home() {
                 </div>
                 <button
                   type="button"
+                  onClick={() => {
+                    addToCart(demoProducts[0]);
+                    navigate("/cart");
+                  }}
                   className="rounded-full bg-violet-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-violet-400"
                 >
                   Add to cart

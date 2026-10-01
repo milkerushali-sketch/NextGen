@@ -437,12 +437,7 @@ const assistantRouter = ({ pool }) => {
     const { rows: products } = await pool.query(
       "SELECT *, id AS _id FROM products ORDER BY rating DESC, reviews DESC LIMIT 100",
     );
-<<<<<<< HEAD
-    const historyKeywords = await getHistoryKeywords(pool);
-    const priceBounds = getPriceBounds(message);
-=======
     const historyKeywords = await getHistoryKeywords(pool, req.auth?.userId);
->>>>>>> fc728442fa7418242f93a91e9e06235a9a7ed00a
     const fallbackSet = buildRecommendationSet(
       message,
       products,

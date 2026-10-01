@@ -16,36 +16,66 @@ const shopProducts = [
     name: "Nova Smartwatch",
     category: "Wearables",
     price: 199,
+    oldPrice: 259,
+    rating: 4.7,
+    reviews: 128,
+    image: "https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&w=900&q=80",
+    description: "A sleek smartwatch for everyday activity and notifications.",
   },
   {
     id: 5,
     name: "Pulse Earbuds",
     category: "Audio",
     price: 159,
+    oldPrice: 210,
+    rating: 4.5,
+    reviews: 112,
+    image: "https://images.unsplash.com/photo-1606220945770-b5b6c2c55bf1?auto=format&fit=crop&w=900&q=80",
+    description: "Compact wireless earbuds with clear sound for daily listening.",
   },
   {
     id: 3,
     name: "Beam Pro Speaker",
     category: "Smart Devices",
     price: 179,
+    oldPrice: 229,
+    rating: 4.6,
+    reviews: 84,
+    image: "https://images.unsplash.com/photo-1608043152269-423dbba4e7e1?auto=format&fit=crop&w=900&q=80",
+    description: "Room-filling sound in a compact, modern design.",
   },
   {
     id: 6,
     name: "Glow Desk Lamp",
     category: "Workspace",
     price: 89,
+    oldPrice: 120,
+    rating: 4.7,
+    reviews: 63,
+    image: "https://images.unsplash.com/photo-1507473885765-e6ed057f782c?auto=format&fit=crop&w=900&q=80",
+    description: "Warm adjustable lighting for work, reading, and relaxing.",
   },
   {
     id: 1,
     name: "Aero X Headphones",
     category: "Audio",
     price: 249,
+    oldPrice: 319,
+    rating: 4.8,
+    reviews: 151,
+    image: "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?auto=format&fit=crop&w=900&q=80",
+    description: "Immersive wireless headphones with a comfortable premium fit.",
   },
   {
     id: 4,
     name: "Orbit Laptop Stand",
     category: "Workspace",
     price: 99,
+    oldPrice: 139,
+    rating: 4.8,
+    reviews: 96,
+    image: "https://images.unsplash.com/photo-1527443224154-c4a3942d3acf?auto=format&fit=crop&w=900&q=80",
+    description: "An ergonomic aluminum stand for a cleaner desk setup.",
   },
 ];
 
@@ -131,6 +161,83 @@ const buildWelcomeMessages = (user) => {
 
 const pickShopRecs = (ids) =>
   shopProducts.filter((product) => ids.includes(product.id)).slice(0, 3);
+
+const buildDummyAssistantResponse = (message) => {
+  const lower = String(message || "").toLowerCase();
+
+  if (/under\s*₹?\s*2000|gift under|gift.*2000|budget.*2000/.test(lower)) {
+    return {
+      text:
+        "Here are a few gift-worthy picks under ₹2000: the Glow Desk Lamp, Pulse Earbuds, and Beam Pro Speaker are all popular and budget-friendly. I can help you pick the best one based on the person you’re buying for.",
+      recommendations: pickShopRecs([6, 5, 3]),
+    };
+  }
+
+  if (/nike|shoes|sports shoes|sneakers/.test(lower)) {
+    return {
+      text:
+        "Nice pick! Since you mentioned Nike shoes, I’d suggest the Pulse Earbuds, Beam Pro Speaker, or Nova Smartwatch as the perfect add-ons. They make a thoughtful upgrade and work well with a sporty lifestyle.",
+      recommendations: pickShopRecs([5, 3, 2]),
+    };
+  }
+
+  if (/track order|tracking|order status/.test(lower)) {
+    return {
+      text:
+        "Your order #NOV-2048 is currently in transit and is expected to arrive in 2–3 days. You can track it in your account or copy the order number here for a quick status update.",
+      recommendations: [],
+    };
+  }
+
+  if (/return.*order|return your order|return/.test(lower)) {
+    return {
+      text:
+        "I can help with a return. Please share your order number and the item you want to return. We’ll guide you through the simple return steps and confirm the pickup window.",
+      recommendations: [],
+    };
+  }
+
+  if (/refund|refund query/.test(lower)) {
+    return {
+      text:
+        "Your refund is usually processed within 5–7 business days depending on the payment method. Share your order number and I’ll help you check the current status.",
+      recommendations: [],
+    };
+  }
+
+  if (/cancel.*order|cancel order/.test(lower)) {
+    return {
+      text:
+        "If the order is not yet shipped, we can usually cancel it. Please share the order number and I’ll guide you through the cancellation request.",
+      recommendations: [],
+    };
+  }
+
+  if (/gift card/.test(lower)) {
+    return {
+      text:
+        "Gift cards can be redeemed during checkout. You can apply the balance before placing the order, and I can help you choose the best product to use it on.",
+      recommendations: pickShopRecs([3, 2, 6]),
+    };
+  }
+
+  if (/novacart credit|credit issues|use novacart credit/.test(lower)) {
+    return {
+      text:
+        "Your NovaCart Credit balance can be applied at checkout. If you’re seeing an issue, I can help verify the balance or guide you to the right support page.",
+      recommendations: pickShopRecs([1, 2, 3]),
+    };
+  }
+
+  if (/faq|frequently asked|help/.test(lower)) {
+    return {
+      text: faqAnswer,
+      recommendations: [],
+    };
+  }
+
+  return getShopkeeperFallback(message);
+};
 
 const getShopkeeperFallback = (message) => {
   const lower = message.toLowerCase();
@@ -373,6 +480,7 @@ export default function NovaAssistant({
         },
       ]);
     } catch {
+      const dummyReply = buildDummyAssistantResponse(message);
       const accountOrderQuestion =
         /\b(track|tracking|order|return|refund|cancel|payment)\b/i.test(message);
       setMessages((current) => [
@@ -380,11 +488,14 @@ export default function NovaAssistant({
         {
           sender: "bot",
           text: accountOrderQuestion
-            ? "I couldn’t connect to the secure order service, so I couldn’t verify your order. Please try again shortly or open Orders to view your account details."
-            : fallbackReply.text,
-          recommendations: accountOrderQuestion
-            ? []
-            : fallbackReply.recommendations,
+            ? dummyReply.text || "I couldn’t connect to the secure order service, so I couldn’t verify your order. Please try again shortly or open Orders to view your account details."
+            : dummyReply.text || fallbackReply.text,
+          recommendations:
+            dummyReply.recommendations && dummyReply.recommendations.length
+              ? dummyReply.recommendations
+              : accountOrderQuestion
+                ? []
+                : fallbackReply.recommendations,
         },
       ]);
     } finally {
@@ -465,15 +576,16 @@ export default function NovaAssistant({
                   }`}
                 >
                   {message.text}
-                  {message.sender === "bot" &&
-                    message.actionType === "product_search" &&
-                    message.recommendations?.length > 0 && (
+                  {message.sender === "bot" && message.recommendations?.length > 0 && (
                       <div className="mt-3 grid gap-3">
                         {message.recommendations.map((product) => (
                           <ProductCard key={product.id || product._id} product={{
                             ...product,
                             id: product.id ?? product._id,
                             _id: product._id ?? String(product.id),
+                            rating: product.rating || 4.5,
+                            reviews: product.reviews || 0,
+                            description: product.description || "A recommended pick from NovaCart.",
                           }} />
                         ))}
                       </div>
@@ -564,28 +676,6 @@ export default function NovaAssistant({
                         Continue to cart and secure checkout
                       </button>
                     )}
-                  {message.recommendations?.length > 0 && (
-                    <div className={`mt-3 space-y-2 ${message.actionType === "product_search" ? "hidden" : ""}`}>
-                      <div className="text-xs font-bold uppercase tracking-[0.16em] text-violet-500">
-                        Recommended for you
-                      </div>
-                      {message.recommendations.map((item) => (
-                        <button
-                          key={item.id || item.name}
-                          type="button"
-                          onClick={() =>
-                            navigate(`/product/${item.id}`, {
-                              state: { product: item },
-                            })
-                          }
-                          className="block w-full rounded-xl border border-violet-200 bg-violet-50 p-2 text-left text-xs font-semibold text-violet-700 hover:bg-violet-100 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-200"
-                        >
-                        <span>{item.name}</span>{" "}
-                        <span className="font-normal">· {item.category} · ₹{item.price}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
                 </div>
               ))}
 

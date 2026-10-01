@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { apiEndpoints, apiUrl, authHeaders } from "../config/api";
 import { useAuth } from "../context/AuthContext";
 import { useCart } from "../context/CartContext";
+import { createLocalOrder, getLocalOrders, saveLocalOrders } from "../utils/localOrder";
 
 export default function Checkout() {
   const navigate = useNavigate();
@@ -11,6 +12,18 @@ export default function Checkout() {
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const tax = total * 0.08;
+
+  const saveDemoOrder = () => {
+    const order = createLocalOrder(items, total + tax);
+    const savedOrders = getLocalOrders();
+    saveLocalOrders([order, ...savedOrders]);
+    clearCart();
+    navigate("/orders", {
+      state: {
+        message: "Order saved in demo mode because the backend checkout service is unavailable.",
+      },
+    });
+  };
 
   const placeOrder = async (event) => {
     event.preventDefault();
@@ -21,6 +34,11 @@ export default function Checkout() {
     setSubmitting(true);
     setError("");
     try {
+      if (!token) {
+        saveDemoOrder();
+        return;
+      }
+
       const response = await fetch(apiUrl(apiEndpoints.orders), {
         method: "POST",
         headers: authHeaders(token),
@@ -32,11 +50,22 @@ export default function Checkout() {
         }),
       });
       const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.message || "Unable to place your order.");
+      if (!response.ok) {
+        if (response.status === 401 || response.status === 403) {
+          saveDemoOrder();
+          return;
+        }
+        throw new Error(data.message || "Unable to place your order.");
+      }
       clearCart();
       navigate("/orders", { state: { message: data.message } });
     } catch (requestError) {
-      setError(requestError.message || "Unable to place your order.");
+      const message = requestError.message || "Unable to place your order.";
+      if (/failed to fetch|network|fetch/i.test(message)) {
+        saveDemoOrder();
+        return;
+      }
+      setError(message);
     } finally {
       setSubmitting(false);
     }
