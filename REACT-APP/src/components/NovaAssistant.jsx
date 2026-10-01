@@ -2,8 +2,13 @@ import { useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { FaCommentDots, FaPaperPlane, FaRobot, FaTimes } from "react-icons/fa";
 import { useAuth } from "../context/AuthContext";
-import { apiUrl, authHeaders } from "../config/api";
+import { apiEndpoints, apiUrl, authHeaders } from "../config/api";
 import { useNavigate } from "react-router-dom";
+import ProductCard from "./ProductCard";
+import OrderTrackingCard from "./OrderTrackingCard";
+import TicketStatusCard from "./TicketStatusCard";
+import PolicyCard from "./PolicyCard";
+import EscalationCard from "./EscalationCard";
 
 const shopProducts = [
   {
@@ -117,22 +122,6 @@ const buildWelcomeMessages = (user) => {
       text: `${greeting}\nI’m Nova AI, your friendly NovaCart shopkeeper. Tell me what you need, ask for a gift, or just browse — I’ll recommend, upsell gently, and help you check out.\nAre you shopping for yourself or someone else? You can also tap an option below 👇`,
     },
   ];
-};
-
-const getRecentPurchases = (user) => {
-  if (!user?.email) return [];
-
-  try {
-    const saved = localStorage.getItem("novacart-purchases");
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      if (Array.isArray(parsed) && parsed.length) return parsed;
-    }
-  } catch {
-    // fallback to default data if storage is unavailable
-  }
-
-  return [];
 };
 
 const pickShopRecs = (ids) =>
@@ -307,7 +296,7 @@ export default function NovaAssistant({
     }
   };
 
-  const sendMessage = async (message) => {
+  const sendMessage = async (message, confirmation = {}) => {
     const userMessage = { sender: "user", text: message };
     setMessages((current) => [...current, userMessage]);
     setInput("");
@@ -316,17 +305,17 @@ export default function NovaAssistant({
     const fallbackReply = getShopkeeperFallback(message);
 
     try {
-      const response = await fetch(apiUrl("/api/agent/query"), {
+      const response = await fetch(apiUrl(apiEndpoints.agentQuery), {
         method: "POST",
         headers: authHeaders(token),
         body: JSON.stringify({
           message,
-          userId: user?.id || null,
-          email: user?.email || "guest",
-          context: {
-            userName: user?.name || "Shopper",
-            recentPurchases: getRecentPurchases(user),
-          },
+          ...(confirmation.confirmedProductId
+            ? {
+                confirmedProductId: confirmation.confirmedProductId,
+                quantity: confirmation.quantity || 1,
+              }
+            : {}),
         }),
       });
 
@@ -336,10 +325,16 @@ export default function NovaAssistant({
 
       const data = await response.json();
       const botReply =
-        typeof data.answer === "string" ? data.answer : fallbackReply.text;
+        typeof data.message === "string"
+          ? data.message
+          : typeof data.answer === "string"
+            ? data.answer
+            : fallbackReply.text;
 
-      const recommendations = Array.isArray(data.recommendations)
-        ? data.recommendations.slice(0, 3)
+      const recommendations = Array.isArray(data.products) && data.products.length
+        ? data.products.slice(0, 3)
+        : Array.isArray(data.recommendations)
+          ? data.recommendations.slice(0, 3)
         : fallbackReply.recommendations;
 
       setMessages((current) => [
@@ -348,7 +343,14 @@ export default function NovaAssistant({
           sender: "bot",
           text: botReply,
           recommendations,
-          shouldEscalate: Boolean(data.should_escalate),
+          actionType: data.actionType || data.action_type,
+          orderDetails: data.orderDetails || data.order_details || null,
+          policyReference: data.policyReference || data.policy_reference || null,
+          ticketId: data.ticketId || data.ticket_id || null,
+          assignedTeam: data.assignedTeam || data.assigned_team || null,
+          escalationReason: data.escalationReason || data.escalation_reason || null,
+          toolsUsed: data.toolsUsed || data.tools_used || [],
+          shouldEscalate: Boolean(data.shouldEscalate ?? data.should_escalate),
         },
       ]);
     } catch {
@@ -435,8 +437,81 @@ export default function NovaAssistant({
                   }`}
                 >
                   {message.text}
+                  {message.sender === "bot" &&
+                    message.actionType === "product_search" &&
+                    message.recommendations?.length > 0 && (
+                      <div className="mt-3 grid gap-3">
+                        {message.recommendations.map((product) => (
+                          <ProductCard key={product.id || product._id} product={{
+                            ...product,
+                            id: product.id ?? product._id,
+                            _id: product._id ?? String(product.id),
+                          }} />
+                        ))}
+                      </div>
+                    )}
+                  {message.sender === "bot" && message.orderDetails && (
+                    <div className="mt-3">
+                      <OrderTrackingCard order={message.orderDetails} />
+                    </div>
+                  )}
+                  {message.sender === "bot" && message.policyReference && (
+                    <div className="mt-3">
+                      <PolicyCard title={message.policyReference}>
+                        {message.text}
+                      </PolicyCard>
+                    </div>
+                  )}
+                  {message.sender === "bot" && message.ticketId && (
+                    <div className="mt-3">
+                      <TicketStatusCard ticket={{
+                        id: message.ticketId,
+                        subject: `Support ticket #${message.ticketId}`,
+                        status: message.shouldEscalate ? "escalated" : "open",
+                        priority: "medium",
+                        description: message.text,
+                      }} />
+                    </div>
+                  )}
+                  {message.sender === "bot" && message.shouldEscalate && (
+                    <div className="mt-3">
+                      <EscalationCard
+                        reason={message.escalationReason}
+                        assignedTeam={message.assignedTeam}
+                        ticketId={message.ticketId}
+                      />
+                    </div>
+                  )}
+                  {message.sender === "bot" &&
+                    message.actionType === "cart_update" &&
+                    message.toolsUsed?.includes("get_product_details") &&
+                    message.recommendations?.[0] && (
+                      <button
+                        type="button"
+                        disabled={isLoading || !isAuthenticated}
+                        onClick={() =>
+                          sendMessage("Yes, add it to my cart", {
+                            confirmedProductId: message.recommendations[0].id,
+                          })
+                        }
+                        className="mt-3 w-full rounded-xl bg-violet-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                      >
+                        {isAuthenticated ? "Confirm add to cart" : "Sign in to add to cart"}
+                      </button>
+                    )}
+                  {message.sender === "bot" &&
+                    message.actionType === "cart_update" &&
+                    message.toolsUsed?.includes("add_to_cart") && (
+                      <button
+                        type="button"
+                        onClick={() => navigate("/cart")}
+                        className="mt-3 w-full rounded-xl bg-violet-600 px-3 py-2 text-sm font-semibold text-white"
+                      >
+                        Continue to cart and secure checkout
+                      </button>
+                    )}
                   {message.recommendations?.length > 0 && (
-                    <div className="mt-3 space-y-2">
+                    <div className={`mt-3 space-y-2 ${message.actionType === "product_search" ? "hidden" : ""}`}>
                       <div className="text-xs font-bold uppercase tracking-[0.16em] text-violet-500">
                         Recommended for you
                       </div>

@@ -2,7 +2,14 @@ import { AnimatePresence, motion } from "framer-motion";
 import { FaShoppingCart, FaStar } from "react-icons/fa";
 import { handleProductImageError } from "../utils/productImage";
 
-export default function CartModal({ product, isOpen, onClose, onConfirm }) {
+export default function CartModal({
+  product,
+  isOpen,
+  onClose,
+  onConfirm,
+  isLoading = false,
+  error = "",
+}) {
   if (!product) return null;
 
   return (
@@ -27,8 +34,8 @@ export default function CartModal({ product, isOpen, onClose, onConfirm }) {
                   <FaShoppingCart />
                 </div>
                 <div>
-                  <div className="text-lg font-black">Buy now</div>
-                  <div className="text-xs text-violet-100">Secure checkout</div>
+                  <div className="text-lg font-black">Add to cart</div>
+                  <div className="text-xs text-violet-100">Review items at checkout</div>
                 </div>
               </div>
               <button
@@ -85,6 +92,8 @@ export default function CartModal({ product, isOpen, onClose, onConfirm }) {
                 <span>₹{(product.price * 1.08).toFixed(2)}</span>
               </div>
 
+              {error && <p role="alert" className="mt-4 text-sm text-red-600">{error}</p>}
+
               <div className="mt-6 flex gap-3">
                 <button
                   type="button"
@@ -96,9 +105,10 @@ export default function CartModal({ product, isOpen, onClose, onConfirm }) {
                 <button
                   type="button"
                   onClick={onConfirm}
+                  disabled={isLoading}
                   className="flex-1 rounded-full bg-slate-900 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-700 dark:bg-violet-500 dark:text-slate-950 dark:hover:bg-violet-400"
                 >
-                  Confirm order
+                  {isLoading ? "Adding..." : "Confirm add to cart"}
                 </button>
               </div>
             </div>

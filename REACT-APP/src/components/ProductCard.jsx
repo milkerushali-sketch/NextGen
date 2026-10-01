@@ -5,7 +5,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { useCart } from "../context/CartContext";
 import { useWishlist } from "../context/WishlistContext";
-import { apiUrl } from "../config/api";
+import { apiEndpoints, apiUrl, authHeaders } from "../config/api";
 import { handleProductImageError } from "../utils/productImage";
 import CartModal from "./CartModal";
 import Product3DView from "./Product3DView";
@@ -18,7 +18,8 @@ export default function ProductCard({ product }) {
   const { items } = useWishlist();
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [isCartOpen, setIsCartOpen] = useState(false);
-
+  const [isAdding, setIsAdding] = useState(false);
+  const [cartError, setCartError] = useState("");
   const isWishlisted = items.some((item) => item.id === product.id);
 
   const handleBuyNow = () => {
@@ -26,44 +27,30 @@ export default function ProductCard({ product }) {
       navigate("/login");
       return;
     }
-
+    setCartError("");
     setIsCartOpen(true);
   };
 
-  const handleConfirmOrder = async () => {
+  const handleConfirmAdd = async () => {
+    setIsAdding(true);
+    setCartError("");
     try {
-      if (token) {
-        await fetch(apiUrl("/api/cart/add"), {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({ product }),
-        });
-
-        await fetch(apiUrl("/api/order"), {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            productId: product.id,
-            product,
-            total: product.price,
-          }),
-        });
+      const response = await fetch(apiUrl(apiEndpoints.addToCart), {
+        method: "POST",
+        headers: authHeaders(token),
+        body: JSON.stringify({ productId: product.id, quantity: 1 }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload.message || "Unable to add this product to your cart.");
       }
-
       addToCart(product);
       setIsCartOpen(false);
-      navigate("/orders");
+      navigate("/cart");
     } catch (error) {
-      console.error(error);
-      addToCart(product);
-      setIsCartOpen(false);
-      navigate("/orders");
+      setCartError(error.message || "Unable to add this product to your cart.");
+    } finally {
+      setIsAdding(false);
     }
   };
 
@@ -80,7 +67,6 @@ export default function ProductCard({ product }) {
             onError={handleProductImageError}
             className="h-72 w-full object-cover"
           />
-
           <AnimatePresence>
             <motion.div
               initial={{ opacity: 0, y: 8, scale: 0.96 }}
@@ -91,9 +77,7 @@ export default function ProductCard({ product }) {
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <div className="text-lg font-black">{product.name}</div>
-                  <div className="mt-1 text-xs text-slate-200">
-                    {product.category}
-                  </div>
+                  <div className="mt-1 text-xs text-slate-200">{product.category}</div>
                 </div>
                 <div className="text-right">
                   <div className="text-base font-black">₹{product.price}</div>
@@ -107,11 +91,9 @@ export default function ProductCard({ product }) {
               </p>
             </motion.div>
           </AnimatePresence>
-
           <div className="absolute left-4 top-4 rounded-full bg-white/90 px-3 py-1 text-xs font-bold text-slate-900">
             {product.category}
           </div>
-
           <div className="absolute right-4 top-4 flex gap-2">
             <WishlistButton
               product={product}
@@ -123,7 +105,6 @@ export default function ProductCard({ product }) {
             />
           </div>
         </div>
-
         <div className="space-y-4 p-5">
           <div className="flex items-center justify-between gap-3">
             <div>
@@ -139,16 +120,14 @@ export default function ProductCard({ product }) {
               type="button"
               onClick={handleBuyNow}
               className="rounded-full bg-violet-500 p-3 text-white transition hover:bg-violet-400"
-              aria-label={`Buy ${product.name}`}
+              aria-label={`Add ${product.name} to cart`}
             >
               <FaShoppingCart />
             </button>
           </div>
-
           <p className="line-clamp-2 text-sm text-slate-600 dark:text-slate-300">
             {product.description}
           </p>
-
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <span className="text-2xl font-black text-slate-900 dark:text-white">
@@ -168,12 +147,13 @@ export default function ProductCard({ product }) {
           </div>
         </div>
       </motion.article>
-
       <CartModal
         product={product}
         isOpen={isCartOpen}
         onClose={() => setIsCartOpen(false)}
-        onConfirm={handleConfirmOrder}
+        onConfirm={handleConfirmAdd}
+        isLoading={isAdding}
+        error={cartError}
       />
       <Product3DView
         product={product}
